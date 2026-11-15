@@ -1,8 +1,12 @@
 {
   "name": "noirboard",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Detective Desk & Evidence Wall network for SillyTavern roleplay",
   "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node scripts/browser-check.mjs"
+  },
   "author": "Ayrissa",
   "license": "MIT"
 }

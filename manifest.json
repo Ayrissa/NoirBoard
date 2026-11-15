@@ -4,8 +4,9 @@
     "requires": [],
     "optional": [],
     "js": "index.js",
+    "css": "style.css",
     "author": "Ayrissa",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "homePage": "https://github.com/Ayrissa/NoirBoard",
     "auto_update": true
 }
