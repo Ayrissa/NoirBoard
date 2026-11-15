@@ -1,0 +1,8 @@
+{
+  "name": "noirboard",
+  "version": "1.0.1",
+  "description": "Detective Desk & Evidence Wall network for SillyTavern roleplay",
+  "type": "module",
+  "author": "Ayrissa",
+  "license": "MIT"
+}

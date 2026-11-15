@@ -1,0 +1,11 @@
+{
+    "display_name": "NoirBoard — Стол детектива и Стена улик",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "author": "Ayrissa",
+    "version": "1.0.1",
+    "homePage": "https://github.com/Ayrissa/NoirBoard",
+    "auto_update": true
+}
