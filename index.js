@@ -133,6 +133,7 @@ function createDefaultSettings() {
         mode: 'standard',
         textProfileId: '',
         imageProfileId: '',
+        imageSource: 'generated',
         autoGenerateImages: false,
         contextMessagesLimit: 25,
         itemsPerScan: 4,
@@ -166,6 +167,7 @@ function normalizeSettings(raw) {
     if (!MODES[out.mode]) out.mode = 'standard';
     out.textProfileId = typeof out.textProfileId === 'string' ? out.textProfileId : '';
     out.imageProfileId = typeof out.imageProfileId === 'string' ? out.imageProfileId : '';
+    out.imageSource = ['generated', 'internet', 'both'].includes(out.imageSource) ? out.imageSource : 'generated';
     out.autoGenerateImages = Boolean(out.autoGenerateImages);
     out.contextMessagesLimit = clampInt(out.contextMessagesLimit, 3, 150, 25);
     out.itemsPerScan = clampInt(out.itemsPerScan, 1, 10, 4);
@@ -286,6 +288,12 @@ function normalizeItem(raw = {}, index = 0) {
         notes,
         imageUrl,
         imagePrompt,
+        imageSearchQuery: typeof raw.imageSearchQuery === 'string' ? raw.imageSearchQuery.slice(0, 180) : '',
+        images: Array.isArray(raw.images) ? raw.images.filter(img => img && safeImageUrl(img.url)).slice(0, 12).map(img => ({
+            url: safeImageUrl(img.url), source: img.source === 'commons' ? 'commons' : 'generated',
+            title: String(img.title || '').slice(0, 300), author: String(img.author || '').slice(0, 500),
+            license: String(img.license || '').slice(0, 100), pageUrl: safeWebUrl(img.pageUrl), licenseUrl: safeWebUrl(img.licenseUrl),
+        })) : [],
         clues,
         metadata,
         createdAt: Number(raw.createdAt) || Date.now(),
@@ -343,6 +351,7 @@ function pinItemToCaseWall(caseData, item, customClueText = '') {
 }
 
 function createStorageManager(getContextFn) {
+    const normalizedCases = new WeakSet();
     function getContext() {
         return typeof getContextFn === 'function' ? getContextFn() : globalThis.SillyTavern?.getContext?.() || {};
     }
@@ -383,14 +392,17 @@ function createStorageManager(getContextFn) {
         const settings = getSettings();
         const key = getCurrentChatKey();
         const charName = getCurrentCharacterName();
-        settings.cases[key] = normalizeCase(settings.cases[key], `Дело: ${charName}`);
+        if (!settings.cases[key] || !normalizedCases.has(settings.cases[key])) {
+            settings.cases[key] = normalizeCase(settings.cases[key], `Дело: ${charName}`);
+            normalizedCases.add(settings.cases[key]);
+        }
         return settings.cases[key];
     }
 
-    function saveCurrentCase(caseData) {
+    function saveCurrentCase(caseData, key = getCurrentChatKey()) {
         const settings = getSettings();
-        const key = getCurrentChatKey();
         settings.cases[key] = normalizeCase(caseData, `Дело: ${getCurrentCharacterName()}`);
+        normalizedCases.add(settings.cases[key]);
         settings.cases[key].updatedAt = Date.now();
         saveSettings();
         return settings.cases[key];
@@ -459,6 +471,7 @@ function renderFingerprintSvg(pattern = 'whorl', seedStr = 'nb', variant = 0) {
                 <circle cx="96" cy="158" r="7" stroke="#b91c1c" stroke-width="1.8" fill="none"/>
                 <circle cx="134" cy="176" r="7" stroke="#b91c1c" stroke-width="1.8" fill="none"/>
             </g>
+            <g opacity="0.65" color="#efe6d5">${[48, 82, 118, 154].map((x, i) => `<svg x="${x - 13}" y="${i === 0 ? 40 : 16}" width="26" height="60" viewBox="0 0 180 220">${renderFingerprintSvg(i % 2 ? 'loop' : 'whorl', seedStr, i + 10).replace(/^<svg[^>]*>|<\/svg>$/g, '')}</svg>`).join('')}</g>
         </svg>`;
     }
 
@@ -477,30 +490,35 @@ function renderFingerprintSvg(pattern = 'whorl', seedStr = 'nb', variant = 0) {
         </svg>`;
     }
 
-    const cx = 90 + (abs % 20) - 10;
-    const cy = 110 + ((abs >> 3) % 18) - 9;
-    const rings = [];
-    for (let r = 8; r <= 76; r += 5) {
-        const rx = r * 0.82;
-        const ry = r * 1.12;
-        const dash = `${10 + ((r + abs) % 14)} ${2 + ((r + abs) % 4)}`;
-        const rot = ((abs + r) % 15) - 7;
-        rings.push(
-            `<ellipse cx="${cx}" cy="${cy}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" transform="rotate(${rot} ${cx} ${cy})" stroke="#1f1c1a" stroke-width="2.1" stroke-dasharray="${dash}" fill="none" opacity="0.88"/>`,
-        );
+    const ridgePaths = [];
+    // Continuous asymmetric papillary ridges with distinct arch/loop/whorl patterns.
+    for (let ridge = 0; ridge < 30; ridge++) {
+        const points = [];
+        for (let step = 0; step <= 100; step++) {
+            const t = step / 100;
+            let x, y;
+            if (p === 'arch') {
+                x = 14 + 152 * t;
+                y = 205 - ridge * 5.6 - (22 + ridge * 0.6) * Math.sin(Math.PI * t);
+            } else if (p === 'loop') {
+                const angle = Math.PI + t * Math.PI;
+                const radius = 5 + ridge * 2.45;
+                x = 86 + radius * Math.cos(angle) * 0.85 + 12 * Math.sin(angle);
+                y = 154 + ridge * 0.9 + radius * Math.sin(angle) * 1.65;
+            } else {
+                const angle = t * Math.PI * 2;
+                const radius = 5 + ridge * 2.45;
+                x = 90 + radius * Math.cos(angle) * (0.83 + 0.08 * Math.sin(angle * 3)) + 6 * Math.sin(angle * 2);
+                y = 100 + radius * Math.sin(angle) * 1.27;
+            }
+            x += Math.sin(step * 0.37 + ridge + abs % 97) * 0.45;
+            y += Math.cos(step * 0.29 + ridge) * 0.35;
+            points.push(`${step ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`);
+        }
+        ridgePaths.push(`<path d="${points.join(' ')}" stroke-width="${(1.1 + (ridge % 4) * 0.12).toFixed(2)}" opacity="${0.65 + (ridge % 5) * 0.06}" ${ridge % 8 === 0 ? 'stroke-dasharray="48 2 72 1"' : ''}/>`);
     }
+    return `<svg viewBox="0 0 180 220" class="nb-fp-svg" aria-label="Художественный отпечаток: ${escapeHtml(p)}"><g fill="none" stroke="currentColor" stroke-linecap="round">${ridgePaths.join('')}</g><path d="M16 205h148" stroke="currentColor" opacity=".3"/><text x="18" y="216" font-size="6" fill="currentColor">SPECIMEN • ${abs.toString(16).toUpperCase()}</text></svg>`;
 
-    const m1x = cx - 18 + (abs % 15);
-    const m1y = cy - 22 + ((abs >> 2) % 15);
-    const m2x = cx + 16 - (abs % 12);
-    const m2y = cy + 18 - ((abs >> 4) % 12);
-
-    return `<svg viewBox="0 0 180 220" class="nb-fp-svg" aria-label="Fingerprint">
-        <rect width="180" height="220" fill="#f3ebd9" rx="4"/>
-        <g>${rings.join('')}</g>
-        <circle cx="${m1x}" cy="${m1y}" r="7" stroke="#c92a2a" stroke-width="1.8" fill="none"/>
-        <circle cx="${m2x}" cy="${m2y}" r="7" stroke="#c92a2a" stroke-width="1.8" fill="none"/>
-    </svg>`;
 }
 
 
@@ -517,11 +535,23 @@ function renderCrimeMapSvg(item) {
             ${Array.from({ length: 7 }, (_, i) => `<line x1="0" y1="${i * 50}" x2="600" y2="${i * 50}"/>`).join('')}
         </g>
         <path d="M390 120 Q450 95 510 130 Q555 175 520 235 Q460 270 400 230 Q365 180 390 120 Z" fill="#a8c3bc" stroke="#6c8c84" stroke-width="2"/>
-        <text x="435" y="185" fill="#2d4a43" font-family="monospace" font-size="11" font-weight="bold">LAKE FOREST</text>
+        <text x="420" y="185" fill="#2d4a43" font-family="monospace" font-size="10">${escapeHtml(String(meta.waterName || 'Водоём').slice(0, 18))}</text>
         <path d="M30 40 Q140 20 210 90 Q180 180 70 160 Z" fill="#c7cfa8" opacity="0.65" stroke="#8a9468" stroke-dasharray="4 3"/>
         <path d="M0 240 Q180 210 310 165 T600 85" stroke="#5c5346" stroke-width="5" fill="none"/>
         <path d="M0 240 Q180 210 310 165 T600 85" stroke="#efe6d5" stroke-width="1.4" stroke-dasharray="10 8" fill="none"/>
         <path d="M190 0 L245 340" stroke="#7a6f5d" stroke-width="3.5" fill="none"/>
+        <g fill="none" stroke="#968b6b" stroke-width="0.65" opacity="0.6">
+            ${Array.from({ length: 16 }, (_, i) => `<path d="M${12 + i * 7} 15 C${60 + i * 12} 45, ${210 + i * 5} 10, ${220 + i * 6} 85 S${110 + i * 10} 170, ${35 + i * 5} 180"/>`).join('')}
+        </g>
+        <g fill="#b2a68d" stroke="#756b59" stroke-width="0.6">
+            ${Array.from({ length: 35 }, (_, i) => { const x = 250 + (i % 7) * 18; const y = 226 + Math.floor(i / 7) * 15; return `<rect x="${x}" y="${y}" width="${8 + i % 4}" height="${6 + i % 5}" transform="rotate(-8 ${x} ${y})"/>`; }).join('')}
+        </g>
+        <path d="M570 0 Q520 45 552 85 T560 165 Q545 230 592 300" fill="none" stroke="#729eaf" stroke-width="7"/>
+        <g fill="none" stroke="#f8f0d9" stroke-width="3"><path d="M240 216L388 205M243 244L394 232M245 274L402 260M269 205L280 312M320 200L333 318M365 196L380 316"/></g>
+        <g fill="#5f714c" opacity="0.65">${Array.from({ length: 28 }, (_, i) => `<path d="M${28 + i % 7 * 23} ${45 + Math.floor(i / 7) * 22}l-4 9h8z"/>`).join('')}</g>
+        <g stroke="#39382b" fill="none"><path d="M555 32v43m-9-30 9-13 9 13M28 315h100m-100-4v8m50-8v8m50-8v8"/></g>
+        <text x="550" y="25" font-size="12" fill="#39382b">N</text>
+        <text x="28" y="307" font-size="8" fill="#39382b">0 — 500 m • SCHEMATIC</text>
         <circle cx="155" cy="195" r="28" stroke="#b91c1c" stroke-width="3" fill="rgba(185,28,28,0.08)"/>
         <circle cx="310" cy="160" r="24" stroke="#b91c1c" stroke-width="2.6" fill="rgba(185,28,28,0.08)"/>
         <circle cx="455" cy="175" r="32" stroke="#b91c1c" stroke-width="2.6" fill="none" stroke-dasharray="8 4"/>
@@ -541,9 +571,9 @@ function renderDeskItemCard(item, isPinned = false) {
     const meta = item.metadata || {};
 
     let visualPreview = '';
-    if (item.type === 'fingerprints') {
+    if (item.type === 'fingerprints' && !item.imageUrl) {
         visualPreview = `<div class="nb-card-fp-preview">${renderFingerprintSvg(meta.fingerprintPattern || 'whorl', item.id, 0)}</div>`;
-    } else if (item.type === 'map') {
+    } else if (item.type === 'map' && !item.imageUrl) {
         visualPreview = `<div class="nb-card-map-preview">${renderCrimeMapSvg(item)}</div>`;
     } else if (item.imageUrl) {
         visualPreview = `<div class="nb-card-photo-wrap"><img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" class="nb-card-photo-img"></div>`;
@@ -579,7 +609,7 @@ function renderDeskItemCard(item, isPinned = false) {
     </article>`;
 }
 
-function renderInspectorContent(item, settings = {}) {
+function renderInspectorContent(item, settings = {}, magnifierActive = false) {
     const meta = item.metadata || {};
     const cluesHtml = Array.isArray(item.clues) && item.clues.length
         ? `<div class="nb-inspector-clues">
@@ -594,7 +624,7 @@ function renderInspectorContent(item, settings = {}) {
         </div>`
         : '';
 
-    const hiddenDetailHtml = meta.hiddenDetail
+    const hiddenDetailHtml = magnifierActive && meta.hiddenDetail
         ? `<div class="nb-hidden-clue-spot" title="Скрытая деталь (наведите лупу)">
             <span class="nb-hidden-clue-label"><i class="fa-solid fa-magnifying-glass"></i> Замечено при детальном осмотре:</span>
             <span class="nb-hidden-clue-value">${escapeHtml(meta.hiddenDetail)}</span>
@@ -639,6 +669,7 @@ function renderInspectorContent(item, settings = {}) {
     return `
     <div class="nb-inspector-sheet-wrap" data-item-id="${escapeHtml(item.id)}">
         ${bodyHtml}
+        ${renderImageGallery(item)}
         ${hiddenDetailHtml}
         ${cluesHtml}
     </div>`;
@@ -821,6 +852,7 @@ function renderFingerprintsView(item) {
             </div>
             <div class="nb-fp-match-badge">${escapeHtml(matchPercent)}</div>
         </div>
+        ${item.imageUrl ? `<img src="${escapeHtml(safeImageUrl(item.imageUrl))}" alt="Иллюстрация отпечатка" class="nb-map-custom-img">` : ''}
         <div class="nb-fp-specimen-grid">
             <div class="nb-fp-fingers-col">
                 <div class="nb-fp-mini-box">
@@ -913,7 +945,7 @@ function renderPhotoView(item) {
 
 function renderMapView(item) {
     const meta = item.metadata || {};
-    const coords = meta.coordinates || '34.0522 N, -118.2437 W';
+    const coords = meta.coordinates || 'Координаты не установлены';
     const locations = Array.isArray(meta.locations) ? meta.locations : [];
 
     return `
@@ -1155,13 +1187,50 @@ async function generateDetectiveText({
 /**
  * Generates an image using SillyTavern's built-in /sd slash command or image generation pipeline.
  */
-async function generateEvidenceImage({ getContextFn, prompt }) {
+function safeWebUrl(value) {
+    try { const url = new URL(String(value || '')); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
+}
+
+function safeImageUrl(value) {
+    const text = String(value || '');
+    if (/^\/(?!\/)[^\s<>]*$/.test(text)) return text;
+    if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(text)) return text;
+    return safeWebUrl(text);
+}
+
+function extractGeneratedImage(response) {
+    const message = response?.choices?.[0]?.message;
+    const candidates = [
+        ...(message?.images || []).map(image => image?.image_url?.url || image?.url),
+        ...(Array.isArray(message?.content) ? message.content : []).map(part => part?.image_url?.url),
+        ...(response?.data || []).map(image => image?.url || (image?.b64_json ? `data:image/png;base64,${image.b64_json}` : '')),
+        ...(response?.candidates?.[0]?.content?.parts || []).map(part => part.inlineData ? `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` : ''),
+    ];
+    return candidates.map(safeImageUrl).find(Boolean) || '';
+}
+
+async function generateEvidenceImage({ getContextFn, prompt, settings = {} }) {
     if (!prompt || !prompt.trim()) return '';
     const ctx = typeof getContextFn === 'function' ? getContextFn() : globalThis.SillyTavern?.getContext?.() || {};
 
+    if (settings.imageProfileId) {
+        const service = ctx.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
+        if (!service?.sendRequest) throw new Error('Connection Manager недоступен. Профиль изображений не переключался.');
+        const response = await service.sendRequest(settings.imageProfileId,
+            [{ role: 'user', content: `Generate an image, not a textual description: ${prompt}` }],
+            4096, { stream: false, extractData: false, includePreset: true, includeInstruct: false },
+            { request_images: true });
+        const url = extractGeneratedImage(response);
+        if (!url) throw new Error('Профиль не вернул изображение. Нужна модель с генерацией картинок через Chat Completions, например совместимая Gemini image-модель.');
+        if (!url.startsWith('data:')) return url;
+        const save = ctx.saveBase64AsFile || (await import('/scripts/utils.js')).saveBase64AsFile;
+        const [, extension, data] = url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+        return await save(data, 'NoirBoard', uid('evidence'), extension);
+    }
+
     if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
         try {
-            const cleanPrompt = prompt.replace(/["\r\n]+/g, ' ').trim();
+            const cleanPrompt = prompt.replace(/["\\|{}\r\n]+/g, ' ').trim();
             const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true "${cleanPrompt}"`, {
                 handleParserFlags: true,
                 handleExecutionErrors: true,
@@ -1175,6 +1244,76 @@ async function generateEvidenceImage({ getContextFn, prompt }) {
         }
     }
     return '';
+}
+
+function commonsImageRecord(page) {
+    const image = page?.imageinfo?.[0];
+    const meta = image?.extmetadata || {};
+    const plain = value => String(value || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').trim();
+    const license = plain(meta.LicenseShortName?.value);
+    if (!/^(CC0|Public domain|CC BY(?:-SA)?(?: [\d.]+)?)$/i.test(license)) return null;
+    if (meta.Restrictions?.value || meta.Permission?.value?.includes('No permission')) return null;
+    const url = safeWebUrl(image.thumburl || image.url);
+    if (!url || !['upload.wikimedia.org', 'thumb.wikimedia.org'].includes(new URL(url).hostname)) return null;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(image.mime)) return null;
+    const pageUrl = safeWebUrl(image.descriptionurl);
+    if (!pageUrl || new URL(pageUrl).hostname !== 'commons.wikimedia.org') return null;
+    const author = plain(meta.Artist?.value || meta.Credit?.value);
+    if (!author) return null;
+    return { url, source: 'commons', title: plain(page.title).replace(/^File:/, ''), author,
+        license, licenseUrl: safeWebUrl(meta.LicenseUrl?.value), pageUrl };
+}
+
+async function findCommonsImage(item, fetchFn = globalThis.fetch) {
+    const query = String(item.imageSearchQuery || `${item.type === 'map' ? 'historic map ' : ''}${item.title} ${item.subtitle || ''}`)
+        .replace(/["|{}\r\n]/g, ' ').trim().slice(0, 180);
+    if (!query) throw new Error('Нет запроса для поиска изображения.');
+    const params = new URLSearchParams({ action: 'query', format: 'json', origin: '*', generator: 'search',
+        gsrsearch: `${query} filetype:bitmap`, gsrnamespace: '6', gsrlimit: '12', prop: 'imageinfo',
+        iiprop: 'url|mime|extmetadata', iiurlwidth: '1280' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+        const response = await fetchFn(`https://commons.wikimedia.org/w/api.php?${params}`, {
+            signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
+        });
+        if (!response.ok) throw new Error(`Wikimedia Commons: HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error('Wikimedia Commons не смог выполнить поиск.');
+        const pages = Object.values(data.query?.pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+        const image = pages.map(commonsImageRecord).find(Boolean);
+        if (!image) throw new Error('Подходящих свободных изображений не найдено. Уточните поисковую фразу или используйте генерацию.');
+        return image;
+    } finally { clearTimeout(timer); }
+}
+
+async function acquireItemImages({ item, settings, getContextFn, findImage = findCommonsImage, generateImage = generateEvidenceImage }) {
+    const results = [];
+    const errors = [];
+    const mode = settings.imageSource || 'generated';
+    if (mode !== 'generated') {
+        try { results.push(await findImage(item)); } catch (error) { errors.push(error.message); }
+    }
+    if (mode !== 'internet') {
+        try {
+            const url = await generateImage({ getContextFn, settings,
+                prompt: item.imagePrompt || `${item.title}, ${item.subtitle || ''}, ${item.type === 'map' ? 'detailed topographic map, roads, terrain, cartography' : 'detective evidence photograph'}` });
+            if (!safeImageUrl(url)) throw new Error('Генератор не вернул изображение.');
+            results.push({ url, source: 'generated', title: item.title, author: '', license: '', pageUrl: '', licenseUrl: '' });
+        } catch (error) { errors.push(error.message); }
+    }
+    if (!results.length) throw new Error(errors.join('\n'));
+    return { images: results, errors };
+}
+
+function renderImageGallery(item) {
+    if (!item.images?.length) return '';
+    return `<section class="nb-image-gallery"><h4>Иллюстрации к материалу</h4><div class="nb-image-options">${item.images.map((image, index) => `
+        <figure><button type="button" class="nb-image-choice ${item.imageUrl === image.url ? 'is-selected' : ''}" data-item-id="${escapeHtml(item.id)}" data-image-index="${index}" title="Использовать на документе и доске">
+            <img src="${escapeHtml(safeImageUrl(image.url))}" alt="${escapeHtml(image.title)}" loading="lazy" referrerpolicy="no-referrer"></button>
+        <figcaption>${image.source === 'commons'
+            ? `Иллюстрация из Commons, не доказательство: <a href="${escapeHtml(safeWebUrl(image.pageUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(image.title)}</a><br>${escapeHtml(image.author)} · ${image.licenseUrl ? `<a href="${escapeHtml(safeWebUrl(image.licenseUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(image.license)}</a>` : escapeHtml(image.license)}`
+            : 'Сгенерировано ИИ · иллюстрация к РП'}</figcaption></figure>`).join('')}</div></section>`;
 }
 
 function buildChatContextSnapshot(getContextFn, settings) {
@@ -1301,6 +1440,7 @@ ${enabledTypesList.map(t => `- "${t}": ${ITEM_TYPES[t]?.label}`).join('\n')}
       "code": "Evidence #12A или № 0426-K",
       "summary": "Короткое описание для карточки (1-2 предложения)",
       "content": "Полный литературный текст документа или описание предмета (2-4 абзаца с деталями, фактами и уликами)",
+      "imageSearchQuery": "Short generic English stock-photo search phrase; no private names, no story spoilers",
       "imagePrompt": "Detailed English visual prompt for generating an illustration/photo of this person or evidence",
       "clues": ["Конкретная зацепка 1", "Конкретная зацепка 2"],
       "pinToWall": true,
@@ -1908,7 +2048,7 @@ function createNoirBoardUI({ storage }) {
                             <i class="fa-solid fa-magnifying-glass"></i> Лупа
                         </button>
                         <button type="button" class="nb-btn nb-btn-secondary nb-act-gen-item-image" data-item-id="${escapeHtml(item.id)}" ${isBusy ? 'disabled' : ''} title="Сгенерировать изображение/фото для этого документа через генератор картинок">
-                            <i class="fa-solid fa-image"></i> Снимок ИИ
+                            <i class="fa-solid fa-image"></i> Иллюстрации
                         </button>
                         <button type="button" class="nb-btn nb-btn-secondary nb-act-set-image-url" data-item-id="${escapeHtml(item.id)}" title="Указать ссылку на своё изображение">
                             <i class="fa-solid fa-link"></i> Фото URL
@@ -1925,7 +2065,7 @@ function createNoirBoardUI({ storage }) {
                     </div>
                 </header>
                 <div class="nb-inspector-scroll" id="nb-inspector-scroll">
-                    ${renderInspectorContent(item, settings)}
+                    ${renderInspectorContent(item, settings, magnifierActive)}
                     <div class="nb-inspector-notes-area">
                         <label for="nb-item-personal-notes"><i class="fa-solid fa-pen"></i> Личные пометки детектива по материалу:</label>
                         <textarea id="nb-item-personal-notes" class="nb-textarea" rows="2" data-item-id="${escapeHtml(item.id)}" placeholder="Запишите свои выводы, подозрения или несостыковки...">${escapeHtml(item.notes || '')}</textarea>
@@ -1944,8 +2084,10 @@ function createNoirBoardUI({ storage }) {
             ...profiles.map(p => `<option value="${escapeHtml(p.id)}" ${settings.textProfileId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.model ? ` (${escapeHtml(p.model)})` : ''}</option>`),
         ].join('');
 
-        // Connection Profiles are text profiles, not image-generation presets.
-        const imageProfileOptions = '<option value="">Настройки Image Generation в SillyTavern (/sd)</option>';
+        const imageProfileOptions = [
+            `<option value="" ${!settings.imageProfileId ? 'selected' : ''}>Image Generation в SillyTavern (/sd)</option>`,
+            ...profiles.map(p => `<option value="${escapeHtml(p.id)}" ${settings.imageProfileId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.model ? ` — ${escapeHtml(p.model)}` : ''}</option>`),
+        ].join('');
 
         const modeCardsHtml = Object.values(MODES).map(m => `
             <label class="nb-mode-option ${settings.mode === m.id ? 'is-selected' : ''}">
@@ -1999,7 +2141,16 @@ function createNoirBoardUI({ storage }) {
                             <div class="nb-field">
                                 <label for="nb-set-image-profile">Генератор изображений:</label>
                                 <select id="nb-set-image-profile" class="nb-select">${imageProfileOptions}</select>
-                                <small class="nb-settings-hint">Используется Image Generation в SillyTavern. Текстовые Connection Profiles не являются профилями изображений.</small>
+                                <small class="nb-settings-hint">Профиль должен поддерживать вывод изображений через Chat Completions (например, совместимая Gemini image-модель). Обычная текстовая модель картинку не создаст. Ключами управляет только SillyTavern.</small>
+                            </div>
+                            <div class="nb-field">
+                                <label for="nb-set-image-source">Откуда брать иллюстрации:</label>
+                                <select id="nb-set-image-source" class="nb-select">
+                                    <option value="generated" ${settings.imageSource === 'generated' ? 'selected' : ''}>Генерация ИИ</option>
+                                    <option value="internet" ${settings.imageSource === 'internet' ? 'selected' : ''}>Свободные изображения из интернета</option>
+                                    <option value="both" ${settings.imageSource === 'both' ? 'selected' : ''}>Оба варианта</option>
+                                </select>
+                                <small class="nb-settings-hint">Интернет: Wikimedia Commons, CC BY / CC BY-SA / CC0 / public domain. Внешний сервис получает короткий поисковый запрос и IP, не весь чат. Подписи с автором и лицензией сохраняются.</small>
                             </div>
                         </div>
                     </section>
@@ -2041,7 +2192,7 @@ function createNoirBoardUI({ storage }) {
                             <label class="nb-type-check"><input type="checkbox" id="nb-set-auto-pin" ${settings.autoPinImportant ? 'checked' : ''}><span>Автоматически прикреплять ключевые улики на Стену связей</span></label>
                             <label class="nb-type-check"><input type="checkbox" id="nb-set-avoid-dups" ${settings.avoidDuplicates ? 'checked' : ''}><span>Не дублировать уже созданные на столе улики</span></label>
                             <label class="nb-type-check"><input type="checkbox" id="nb-set-char-bio" ${settings.includeCharDescription ? 'checked' : ''}><span>Учитывать описание и анкету персонажа</span></label>
-                            <label class="nb-type-check"><input type="checkbox" id="nb-set-auto-img" ${settings.autoGenerateImages ? 'checked' : ''}><span>Авто-генерация снимков через /sd при изучении дела</span></label>
+                            <label class="nb-type-check"><input type="checkbox" id="nb-set-auto-img" ${settings.autoGenerateImages ? 'checked' : ''}><span>Автоматически подбирать иллюстрации при изучении дела</span></label>
                         </div>
                     </section>
 
@@ -2131,6 +2282,7 @@ function createNoirBoardUI({ storage }) {
         if (isBusy) return;
         const settings = storage.getSettings();
         const currentCase = storage.getCurrentCase();
+        const chatKey = storage.getCurrentChatKey();
         setBusy(true, 'ИИ изучает чат и создаёт улики...');
 
         try {
@@ -2139,24 +2291,21 @@ function createNoirBoardUI({ storage }) {
                 settings,
                 currentCase,
             });
-            storage.saveCurrentCase(currentCase);
+            storage.saveCurrentCase(currentCase, chatKey);
             notify('success', `Добавлено материалов на стол: ${addedItems.length}`);
 
             if (settings.autoGenerateImages) {
                 for (const item of addedItems) {
-                    if (item.imagePrompt && ['dossier', 'photo', 'newspaper', 'evidence_bag'].includes(item.type)) {
-                        const imgUrl = await generateEvidenceImage({
-                            getContextFn: storage.getContext,
-                            prompt: item.imagePrompt,
-                        });
-                        if (imgUrl) {
-                            item.imageUrl = imgUrl;
-                            const pinned = currentCase.nodes.find(n => n.itemId === item.id);
-                            if (pinned) pinned.imageUrl = imgUrl;
-                        }
-                    }
+                    if (!['dossier', 'photo', 'newspaper', 'evidence_bag', 'map', 'fingerprints'].includes(item.type)) continue;
+                    try {
+                        const result = await acquireItemImages({ item, settings, getContextFn: storage.getContext });
+                        item.images = result.images;
+                        item.imageUrl = result.images[0].url;
+                        currentCase.nodes.filter(n => n.itemId === item.id).forEach(n => { n.imageUrl = item.imageUrl; });
+                        if (result.errors.length) notify('warning', result.errors.join('\n'));
+                    } catch (error) { notify('warning', `${item.title}: ${error.message}`); }
                 }
-                storage.saveCurrentCase(currentCase);
+                storage.saveCurrentCase(currentCase, chatKey);
             }
         } catch (err) {
             console.error('[NoirBoard] Scan failed:', err);
@@ -2418,6 +2567,7 @@ function createNoirBoardUI({ storage }) {
 
         settings.textProfileId = rootEl.querySelector('#nb-set-text-profile')?.value || '';
         settings.imageProfileId = rootEl.querySelector('#nb-set-image-profile')?.value || '';
+        settings.imageSource = rootEl.querySelector('#nb-set-image-source')?.value || 'generated';
         settings.itemsPerScan = Math.max(1, Math.min(10, Number(rootEl.querySelector('#nb-set-items-count')?.value) || 4));
         settings.contextMessagesLimit = Math.max(3, Math.min(150, Number(rootEl.querySelector('#nb-set-context-limit')?.value) || 25));
         settings.maxResponseTokens = Math.max(512, Math.min(8192, Number(rootEl.querySelector('#nb-set-max-tokens')?.value) || 2800));
@@ -2709,26 +2859,48 @@ function createNoirBoardUI({ storage }) {
 
 
     async function handleItemAndWallActions(target) {
+        const imageChoice = target.closest('.nb-image-choice');
+        if (imageChoice) {
+            const currentCase = storage.getCurrentCase();
+            const item = currentCase.items.find(i => i.id === imageChoice.dataset.itemId);
+            const image = item?.images?.[Number(imageChoice.dataset.imageIndex)];
+            if (image) {
+                item.imageUrl = image.url;
+                currentCase.nodes.filter(n => n.itemId === item.id).forEach(n => { n.imageUrl = image.url; });
+                storage.saveCurrentCase(currentCase);
+                render();
+            }
+            return;
+        }
         const genImgBtn = target.closest('.nb-act-gen-item-image');
         if (genImgBtn) {
+            if (isBusy) return;
             const itemId = genImgBtn.getAttribute('data-item-id');
             const currentCase = storage.getCurrentCase();
+            const chatKey = storage.getCurrentChatKey();
             const item = currentCase.items.find(i => i.id === itemId);
             if (item) {
-                const prompt = item.imagePrompt || `${item.title}, ${item.subtitle || ''}, detective noir evidence photography`;
-                setBusy(true, 'Генерируем снимок...');
+                const settings = storage.getSettings();
+                if (settings.imageSource !== 'generated') {
+                    const query = window.prompt('Запрос в Wikimedia Commons (только эта фраза уйдёт в интернет):', item.imageSearchQuery || item.title);
+                    if (query === null) return;
+                    item.imageSearchQuery = query.trim().slice(0, 180);
+                }
+                setBusy(true, 'Подбираем иллюстрации...');
                 try {
-                    const url = await generateEvidenceImage({ getContextFn: storage.getContext, prompt });
-                    if (url) {
-                        item.imageUrl = url;
+                    const result = await acquireItemImages({ item, settings, getContextFn: storage.getContext });
+                    if (result.images.length) {
+                        item.images = [...result.images, ...(item.images || [])].slice(0, 12);
+                        item.imageUrl = result.images[0].url;
                         currentCase.nodes.forEach(n => {
-                            if (n.itemId === item.id) n.imageUrl = url;
+                            if (n.itemId === item.id) n.imageUrl = item.imageUrl;
                         });
-                        storage.saveCurrentCase(currentCase);
-                        notify('success', 'Снимок успешно сгенерирован!');
-                    } else {
-                        notify('warning', 'Генератор картинок не вернул изображение. Вы можете вставить URL вручную.');
+                        storage.saveCurrentCase(currentCase, chatKey);
+                        notify('success', 'Иллюстрации добавлены. Выберите нужную внизу документа.');
+                        if (result.errors.length) notify('warning', result.errors.join('\n'));
                     }
+                } catch (error) {
+                    notify('error', error.message || 'Не удалось получить изображение.');
                 } finally {
                     setBusy(false);
                 }
@@ -2856,7 +3028,7 @@ function createNoirBoardUI({ storage }) {
     }
 
     document.addEventListener('pointerdown', e => {
-        if (!isOpen || !rootEl || activeTab !== 'wall') return;
+        if (!isOpen || !rootEl || activeTab !== 'wall' || isSettingsOpen || inspectedItemId || e.button !== 0) return;
         const target = e.target;
         if (!(target instanceof Element)) return;
         if (target.closest('button') || target.closest('[data-pin-node-id]')) return;
@@ -2877,7 +3049,8 @@ function createNoirBoardUI({ storage }) {
         const boardRect = board.getBoundingClientRect();
 
         draggingNodeId = nodeId;
-        nodeEl.setPointerCapture?.(e.pointerId);
+        if (nodeEl.hasPointerCapture && e.isTrusted) nodeEl.setPointerCapture(e.pointerId);
+        e.preventDefault();
         dragOffsetX = e.clientX - boardRect.left - nodeEl.offsetLeft;
         dragOffsetY = e.clientY - boardRect.top - nodeEl.offsetTop;
         nodeEl.classList.add('is-dragging');

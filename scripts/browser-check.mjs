@@ -50,6 +50,15 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
             }
             click('.nb-act-close-inspector');
         }
+        click('.nb-desk-card--dossier .nb-act-inspect');
+        check('hidden detail absent without magnifier', !document.querySelector('.nb-hidden-clue-spot'));
+        click('.nb-act-toggle-magnifier');
+        check('hidden detail revealed with magnifier', Boolean(document.querySelector('.nb-hidden-clue-spot')));
+        click('.nb-act-toggle-magnifier');
+        check('hidden detail removed after disabling magnifier', !document.querySelector('.nb-hidden-clue-spot'));
+        const paperColor = getComputedStyle(document.querySelector('.nb-doc-folder')).backgroundColor;
+        check('document uses complete theme palette', paperColor === ({ standard: 'rgb(229, 208, 167)', modern: 'rgb(16, 44, 71)', supernatural: 'rgb(211, 188, 223)' })[mode]);
+        click('.nb-act-close-inspector');
         click('.nb-act-open-settings');
         const body = document.querySelector('.nb-settings-body');
         check('settings fits viewport', fits(document.querySelector('.nb-settings-modal')));
@@ -60,10 +69,25 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('wall scroll container fits', fits(document.querySelector('.nb-wall-board-wrap')));
         check('wall has threads', document.querySelectorAll('.nb-thread-line').length > 0);
         check('touch dragging enabled', getComputedStyle(document.querySelector('.nb-wall-node')).touchAction === 'none');
+        const before = storage.getCurrentCase().nodes[0];
+        const nodeId = before.id;
+        const startX = before.x, startY = before.y;
+        const element = [...document.querySelectorAll('.nb-wall-node')].find(el => el.dataset.nodeId === nodeId);
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: rect.left + 30, clientY: rect.top + 30 }));
+        document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: rect.left + 110, clientY: rect.top + 90 }));
+        document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+        const moved = storage.getCurrentCase().nodes.find(n => n.id === nodeId);
+        check('pointer drag changes stored coordinates', moved.x === startX + 80 && moved.y === startY + 60);
+        ui.close(); ui.open('wall');
+        const restored = [...document.querySelectorAll('.nb-wall-node')].find(el => el.dataset.nodeId === nodeId);
+        check('drag survives reopening board', parseInt(restored.style.left) === startX + 80);
         if (view !== 'wall') {
             click('[data-nb-tab="desk"]');
             if (view === 'settings') click('.nb-act-open-settings');
             if (view === 'document') click('.nb-desk-card--dossier .nb-act-inspect');
+            if (view === 'prints') click('.nb-desk-card--fingerprints .nb-act-inspect');
+            if (view === 'map') click('.nb-desk-card--map .nb-act-inspect');
         }
     } catch (error) { results.push({ name: error.message, pass: false }); }
     document.body.dataset.testResults = JSON.stringify(results);
@@ -76,6 +100,11 @@ const scenarios = [
     ['desktop-document', 1440, 1000, 'standard', 'document'],
     ['phone-modern', 390, 844, 'modern', 'desk'],
     ['desktop-wall', 1440, 1000, 'supernatural', 'wall'],
+    ['desktop-modern-document', 1440, 1000, 'modern', 'document'],
+    ['desktop-mystic', 1440, 1000, 'supernatural', 'desk'],
+    ['phone-mystic-document', 390, 844, 'supernatural', 'document'],
+    ['desktop-prints', 1440, 1000, 'standard', 'prints'],
+    ['desktop-map', 1440, 1000, 'standard', 'map'],
 ];
 let failures = 0;
 for (const [name, width, height, mode, view] of scenarios) {

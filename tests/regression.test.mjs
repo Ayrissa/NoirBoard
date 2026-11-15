@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 function load() {
-    const sandbox = vm.createContext({ console, jQuery: () => {} });
+    const sandbox = vm.createContext({ console, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, jQuery: () => {} });
     vm.runInContext(source, sandbox);
     return sandbox;
 }
@@ -89,4 +89,90 @@ test('all ten document types render without exceptions', () => {
         assert.match(app.renderDeskItemCard(item), /nb-desk-card/);
         assert.match(app.renderInspectorContent(item), /nb-doc-/);
     }
+});
+
+test('hidden details are absent from markup until magnifier is enabled', () => {
+    const app = load();
+    const item = app.normalizeItem({ metadata: { hiddenDetail: 'SECRET DETAIL' } });
+    assert.doesNotMatch(app.renderInspectorContent(item), /SECRET DETAIL|nb-hidden-clue-spot/);
+    assert.match(app.renderInspectorContent(item, {}, true), /SECRET DETAIL/);
+    assert.doesNotMatch(app.renderInspectorContent(item, {}, false), /SECRET DETAIL/);
+});
+
+test('case reads preserve live references so dragging and note edits persist', () => {
+    const app = load();
+    const ctx = { extensionSettings: {}, characterId: 0, chatId: 'one' };
+    const storage = app.createStorageManager(() => ctx);
+    const original = storage.getCurrentCase();
+    const item = app.normalizeItem({ title: 'Evidence' });
+    original.items.push(item);
+    app.pinItemToCaseWall(original, item);
+    original.nodes[0].x = 400;
+    original.items[0].notes = 'Note';
+    assert.equal(storage.getCurrentCase(), original);
+    assert.equal(storage.getCurrentCase().nodes[0].x, 400);
+    assert.equal(storage.getCurrentCase().items[0].notes, 'Note');
+    storage.saveCurrentCase(original);
+    assert.equal(storage.getCurrentCase().nodes[0].x, 400);
+    const oldKey = storage.getCurrentChatKey();
+    ctx.chatId = 'two';
+    storage.saveCurrentCase(original, oldKey);
+    assert.equal(storage.getCurrentCase().items.length, 0);
+});
+
+test('image profile receives image request flag and persists inline image without reading secrets', async () => {
+    const app = load();
+    let saved = false;
+    const ctx = {
+        ConnectionManagerRequestService: { async sendRequest(id, messages, tokens, options, overrides) {
+            assert.equal(id, 'image-profile'); assert.equal(options.extractData, false); assert.equal(overrides.request_images, true);
+            return { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] } }] };
+        } },
+        async saveBase64AsFile(data, folder, name, extension) {
+            assert.equal(data, 'AAAA'); assert.equal(folder, 'NoirBoard'); assert.equal(extension, 'png'); saved = true; return '/user/images/test.png';
+        },
+        executeSlashCommandsWithOptions() { throw Error('Wrong fallback'); },
+    };
+    Object.defineProperty(ctx, 'secrets', { get() { throw Error('Secret accessed'); } });
+    assert.equal(await app.generateEvidenceImage({ getContextFn: () => ctx, prompt: 'map', settings: { imageProfileId: 'image-profile' } }), '/user/images/test.png');
+    assert.ok(saved);
+    ctx.ConnectionManagerRequestService.sendRequest = async () => ({ choices: [{ message: { content: 'text only' } }] });
+    await assert.rejects(app.generateEvidenceImage({ getContextFn: () => ctx, prompt: 'map', settings: { imageProfileId: 'image-profile' } }), /не вернул изображение/);
+});
+
+test('Commons search accepts only eligible licenses with attribution and omits credentials', async () => {
+    const app = load();
+    const page = { title: 'File:Forest.jpg', imageinfo: [{ mime: 'image/jpeg', thumburl: 'https://upload.wikimedia.org/test.jpg', descriptionurl: 'https://commons.wikimedia.org/wiki/File:Forest.jpg', extmetadata: {
+        LicenseShortName: { value: 'CC BY-SA 4.0' }, Artist: { value: '<b>Photographer</b>' }, LicenseUrl: { value: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+    } }] };
+    const result = await app.findCommonsImage({ imageSearchQuery: 'forest road' }, async (url, options) => {
+        assert.match(url, /commons.wikimedia.org/); assert.equal(options.credentials, 'omit'); assert.equal(options.referrerPolicy, 'no-referrer');
+        return { ok: true, json: async () => ({ query: { pages: { 1: page } } }) };
+    });
+    assert.equal(result.author, 'Photographer'); assert.equal(result.source, 'commons');
+    page.imageinfo[0].extmetadata.LicenseShortName.value = 'All rights reserved';
+    assert.equal(app.commonsImageRecord(page), null);
+    assert.equal(app.safeImageUrl('javascript:alert(1)'), '');
+    assert.equal(app.safeWebUrl('data:text/html,test'), '');
+});
+
+test('both image modes retain both sources and preserve partial success', async () => {
+    const app = load();
+    const args = { item: { title: 'Map', type: 'map' }, settings: { imageSource: 'both' },
+        findImage: async () => ({ url: 'https://upload.wikimedia.org/map.jpg', source: 'commons' }),
+        generateImage: async () => '/images/map.png' };
+    assert.equal((await app.acquireItemImages(args)).images.length, 2);
+    args.generateImage = async () => { throw Error('Provider failed'); };
+    const partial = await app.acquireItemImages(args);
+    assert.equal(partial.images.length, 1); assert.equal(partial.errors.length, 1);
+    args.settings.imageSource = 'internet';
+    assert.equal((await app.acquireItemImages(args)).errors.length, 0);
+});
+
+test('fingerprint ridge patterns differ and maps use context instead of hard-coded place names', () => {
+    const app = load();
+    assert.notEqual(app.renderFingerprintSvg('arch', 'seed'), app.renderFingerprintSvg('loop', 'seed'));
+    assert.match(app.renderFingerprintSvg('whorl', 'seed'), /SPECIMEN/);
+    const map = app.renderCrimeMapSvg({ title: 'Town', metadata: { waterName: 'River' } });
+    assert.match(map, /River/); assert.doesNotMatch(map, /LAKE FOREST/);
 });
