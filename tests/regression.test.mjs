@@ -121,24 +121,24 @@ test('case reads preserve live references so dragging and note edits persist', (
     assert.equal(storage.getCurrentCase().items.length, 0);
 });
 
-test('image profile receives image request flag and persists inline image without reading secrets', async () => {
+test('direct image API uses session key only and saves inline result', async () => {
     const app = load();
-    let saved = false;
-    const ctx = {
-        ConnectionManagerRequestService: { async sendRequest(id, messages, tokens, options, overrides) {
-            assert.equal(id, 'image-profile'); assert.equal(options.extractData, false); assert.equal(overrides.request_images, true);
-            return { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'AAAA' } }] } }] };
-        } },
-        async saveBase64AsFile(data, folder, name, extension) {
-            assert.equal(data, 'AAAA'); assert.equal(folder, 'NoirBoard'); assert.equal(extension, 'png'); saved = true; return '/user/images/test.png';
-        },
-        executeSlashCommandsWithOptions() { throw Error('Wrong fallback'); },
+    app.setImageSessionKey('test-key', 'https://example.com/v1');
+    const settings = { imageApiUrl: 'https://example.com/v1', imageModel: 'image-model' };
+    const ctx = { saveBase64AsFile: async () => '/images/generated.png' };
+    const fetchFn = async (url, options) => {
+        assert.equal(url, 'https://example.com/v1/images/generations');
+        assert.equal(options.headers.Authorization, 'Bearer test-key');
+        assert.equal(options.redirect, 'error'); assert.equal(options.credentials, 'omit');
+        assert.equal(JSON.parse(options.body).model, 'image-model');
+        return { ok: true, json: async () => ({ data: [{ b64_json: 'AAAA' }] }) };
     };
-    Object.defineProperty(ctx, 'secrets', { get() { throw Error('Secret accessed'); } });
-    assert.equal(await app.generateEvidenceImage({ getContextFn: () => ctx, prompt: 'map', settings: { imageProfileId: 'image-profile' } }), '/user/images/test.png');
-    assert.ok(saved);
-    ctx.ConnectionManagerRequestService.sendRequest = async () => ({ choices: [{ message: { content: 'text only' } }] });
-    await assert.rejects(app.generateEvidenceImage({ getContextFn: () => ctx, prompt: 'map', settings: { imageProfileId: 'image-profile' } }), /не вернул изображение/);
+    assert.equal(await app.generateEvidenceImage({ settings, prompt: 'map', getContextFn: () => ctx, fetchFn }), '/images/generated.png');
+    assert.doesNotMatch(JSON.stringify(settings), /test-key/);
+    await assert.rejects(app.generateEvidenceImage({ settings: { ...settings, imageApiUrl: 'https://other.test/v1' }, prompt: 'map', fetchFn }), /изменён/);
+    assert.throws(() => app.imageEndpoint('http://external.test/v1'));
+    assert.throws(() => app.imageEndpoint('https://example.com/v1?key=test'));
+    assert.equal(app.imageEndpoint('http://localhost:1234/v1/'), 'http://localhost:1234/v1/images/generations');
 });
 
 test('Commons search accepts only eligible licenses with attribution and omits credentials', async () => {
@@ -200,11 +200,12 @@ test('demo pack adds all evidence types without replacing existing items and is 
     assert.equal(data.connections.length, 0);
 });
 
-test('selected profile and backend normalization preserve compatibility', () => {
+test('obsolete image profiles and persistent key fields are removed', () => {
     const app = load();
-    assert.equal(app.normalizeSettings({ imageProfileId: 'old-profile' }).imageBackend, 'connection');
-    assert.equal(app.normalizeSettings({ imageBackend: 'sillyimages' }).imageBackend, 'sillyimages');
-    assert.equal(app.normalizeSettings({ imageBackend: 'unknown' }).imageBackend, 'tavern');
+    const settings = app.normalizeSettings({ imageProfileId: 'old', imageBackend: 'sillyimages', imageApiKey: 'secret', apiKey: 'secret' });
+    assert.equal(settings.imageProfileId, undefined); assert.equal(settings.imageBackend, undefined);
+    assert.doesNotMatch(JSON.stringify(settings), /secret/);
+    assert.equal(settings.hideChatConclusions, false);
 });
 
 test('object evidence uses item-specific SVGs instead of treating every exhibit as paper', () => {
@@ -216,15 +217,18 @@ test('object evidence uses item-specific SVGs instead of treating every exhibit 
     }
 });
 
-test('SillyImages calls exported pipeline without inserting inline media into the chat', async () => {
+test('sent conclusions are marked without altering context visibility flags', () => {
     const app = load();
-    let called = false;
-    const loadModule = async path => path.endsWith('pipeline.js')
-        ? { generateImageWithRetry: async (prompt, style, callback, options) => { called = true; assert.equal(prompt, 'amulet'); assert.equal(options.messageId, undefined); return 'data:image/png;base64,AAAA'; } }
-        : { saveImageToFile: async data => { assert.equal(data, 'data:image/png;base64,AAAA'); return '/images/amulet.png'; } };
-    assert.equal(await app.generateWithSillyImages('amulet', loadModule), '/images/amulet.png');
-    assert.ok(called);
-    await assert.rejects(app.generateWithSillyImages('amulet', async () => { throw Error('missing'); }), /SillyImages не найден/);
+    const ctx = { chat: [], chatId: 'one', characterId: 0, extensionSettings: {} };
+    const key = app.createStorageManager(() => ctx).getCurrentChatKey();
+    app.stageConclusion(ctx, key, 'My deduction');
+    ctx.chat.push({ is_user: true, mes: 'My deduction', is_system: false });
+    assert.equal(app.markSentConclusion(ctx, 0), true);
+    assert.equal(ctx.chat[0].extra.noirboardConclusion, true);
+    assert.equal(ctx.chat[0].is_system, false); assert.equal(ctx.chat[0].mes, 'My deduction');
+    app.stageConclusion(ctx, key, 'Other deduction');
+    ctx.chat.push({ is_user: true, mes: 'Ordinary message' });
+    assert.equal(app.markSentConclusion(ctx, 1), false); assert.equal(ctx.chat[1].extra, undefined);
 });
 
 test('modern search abort signal prevents applying a late response', async () => {

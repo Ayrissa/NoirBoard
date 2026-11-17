@@ -24,7 +24,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         return rect.left >= -1 && rect.right <= viewportWidth + 1 && rect.top >= -1 && rect.bottom <= viewportHeight + 1;
     };
     try {
-        const ctx = { extensionSettings: {}, characterId: 0, characters: [{ avatar: 'test.png', name: 'Detective' }], chatId: 'test', saveSettingsDebounced() {}, generateRaw: async () => '{"results":[{"title":"Simulated result"}]}' };
+        const ctx = { chat: [], extensionSettings: {}, characterId: 0, characters: [{ avatar: 'test.png', name: 'Detective' }], chatId: 'test', saveSettingsDebounced() {}, generateRaw: async () => '{"results":[{"title":"Simulated result"}]}' };
         const storage = createStorageManager(() => ctx);
         storage.getSettings().mode = mode;
         const ui = createNoirBoardUI({ storage });
@@ -34,7 +34,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('main window fits viewport', fits(document.querySelector('.nb-window')));
         check('desk has no horizontal overflow', document.querySelector('.nb-desk-surface').scrollWidth <= document.querySelector('.nb-desk-surface').clientWidth + 1);
         let current = storage.getCurrentCase();
-        const demoExpected = mode === 'supernatural' ? 24 : 21;
+        const demoExpected = mode === 'supernatural' ? 30 : 21;
         check('demo preserves existing evidence', current.items.filter(item => item.isDemo).length === demoExpected);
         click('.nb-act-load-demo');
         check('demo repeat is idempotent', storage.getCurrentCase().items.filter(item => item.isDemo).length === demoExpected);
@@ -80,7 +80,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('document uses complete theme palette', paperColor === ({ standard: 'rgb(229, 208, 167)', modern: 'rgb(16, 44, 71)', supernatural: 'rgb(211, 188, 223)' })[mode]);
         click('.nb-act-close-inspector');
         click('.nb-act-open-settings');
-        check('image backend modes available', ['tavern', 'sillyimages', 'connection'].every(value => [...document.querySelector('#nb-set-image-backend').options].some(option => option.value === value)));
+        check('direct image connection fields replace profile selector', Boolean(document.querySelector('#nb-set-image-url') && document.querySelector('#nb-set-image-key') && document.querySelector('#nb-set-image-model')) && !document.querySelector('#nb-set-image-backend'));
         const body = document.querySelector('.nb-settings-body');
         check('settings fits viewport', fits(document.querySelector('.nb-settings-modal')));
         check('settings no horizontal overflow', body.scrollWidth <= body.clientWidth + 1);
@@ -134,6 +134,24 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         click('.nb-act-case-summary'); await flush();
         click('.nb-act-send-summary');
         check('summary goes to chat draft only', chatInput.value.includes('hypothesis') && !ctx.chat?.length);
+        ctx.chat.push({ is_user: true, mes: chatInput.value, is_system: false });
+        check('sent summary gets a private metadata marker', markSentConclusion(ctx, 0));
+        const chat = document.createElement('div'); chat.id = 'chat';
+        chat.innerHTML = '<div class="mes" mesid="0">Conclusion</div><div class="mes" mesid="1">Normal message</div>';
+        document.body.appendChild(chat);
+        storage.getSettings().hideChatConclusions = true;
+        refreshConclusionVisibility(ctx);
+        check('only conclusion hidden visually', getComputedStyle(chat.children[0]).display === 'none' && getComputedStyle(chat.children[1]).display !== 'none');
+        check('hidden conclusion stays in context', ctx.chat[0].mes === chatInput.value && ctx.chat[0].is_system === false);
+        storage.getSettings().hideChatConclusions = false; refreshConclusionVisibility(ctx);
+        check('conclusion visibility reversible', getComputedStyle(chat.children[0]).display !== 'none');
+        ui.open('desk'); click('.nb-act-edit-deduction');
+        document.querySelector('#nb-manual-deduction').value = 'My manually written conclusion';
+        click('.nb-act-save-deduction');
+        check('manual deduction saved without AI', storage.getCurrentCase().deduction === 'My manually written conclusion');
+        click('.nb-act-edit-deduction'); click('.nb-act-draft-deduction');
+        check('manual deduction can go to chat unchanged', document.querySelector('#nb-summary-draft').value === 'My manually written conclusion');
+        click('.nb-act-close-summary');
         ui.open(view === 'wall' ? 'wall' : 'desk');
         if (view !== 'wall') {
             click('[data-nb-tab="desk"]');

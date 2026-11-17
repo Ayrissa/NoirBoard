@@ -7,6 +7,9 @@ const EVIDENCE_ASSETS = Object.freeze({
     medicine: 'medicine.png', phone: 'phone.png', plant_sample: 'plant-sample.png',
     money: 'banknotes.png', cartridges: 'cartridges.png', pocket_contents: 'pocket-contents.png',
     evidence_package: 'evidence-bag.png',
+    blood_bag: 'blood-bag.png', amulet: 'amulet.png', crystal: 'crystal.png',
+    grimoire: 'grimoire.png', tarot: 'tarot.png', potion: 'potion.png', skull: 'skull.png',
+    spirit_board: 'spirit-board.png', crystal_ball: 'crystal-ball.png',
 });
 
 function builtinEvidenceUrl(kind) {
@@ -144,8 +147,9 @@ function createDefaultSettings() {
         version: 1,
         mode: 'standard',
         textProfileId: '',
-        imageProfileId: '',
-        imageBackend: 'tavern',
+        imageApiUrl: '',
+        imageModel: '',
+        hideChatConclusions: false,
         imageSource: 'generated',
         autoGenerateImages: false,
         contextMessagesLimit: 25,
@@ -179,9 +183,11 @@ function normalizeSettings(raw) {
 
     if (!MODES[out.mode]) out.mode = 'standard';
     out.textProfileId = typeof out.textProfileId === 'string' ? out.textProfileId : '';
-    out.imageProfileId = typeof out.imageProfileId === 'string' ? out.imageProfileId : '';
-    out.imageBackend = ['tavern', 'sillyimages', 'connection'].includes(raw.imageBackend)
-        ? raw.imageBackend : (out.imageProfileId ? 'connection' : 'tavern');
+    delete out.imageProfileId; delete out.imageBackend;
+    delete out.imageApiKey; delete out.apiKey;
+    out.imageApiUrl = typeof out.imageApiUrl === 'string' ? out.imageApiUrl.trim() : '';
+    out.imageModel = typeof out.imageModel === 'string' ? out.imageModel.trim().slice(0, 200) : '';
+    out.hideChatConclusions = out.hideChatConclusions === true;
     out.imageSource = ['generated', 'internet', 'both'].includes(out.imageSource) ? out.imageSource : 'generated';
     out.autoGenerateImages = Boolean(out.autoGenerateImages);
     out.contextMessagesLimit = clampInt(out.contextMessagesLimit, 3, 150, 25);
@@ -474,6 +480,12 @@ function addDemoMaterials(caseData, mode) {
     for (const [objectKind, title] of demoObjects) specs.push(['evidence_bag', title,
         'Демонстрационный предмет. Изображение показывает оформление вещдока; надписи и детали на нём не являются установленными фактами дела.', { objectKind }]);
     if (mode === 'supernatural') specs.push(
+        ['occult', 'Старинный гримуар', 'Книга с неизвестными знаками. Текст требует изучения.', { objectKind: 'grimoire' }],
+        ['occult', 'Колода Таро', 'Карты найдены среди личных вещей.', { objectKind: 'tarot' }],
+        ['occult', 'Флакон зелья', 'Состав жидкости не установлен.', { objectKind: 'potion' }],
+        ['occult', 'Череп', 'Происхождение требует экспертизы.', { objectKind: 'skull' }],
+        ['occult', 'Спиритическая доска', 'На доске сохранились следы прикосновений.', { objectKind: 'spirit_board' }],
+        ['occult', 'Магический шар', 'Сфера из фиолетового материала.', { objectKind: 'crystal_ball' }],
         ['occult', 'Серебряный амулет', 'Амулет холоднее окружающего воздуха. Причина не установлена.', { objectKind: 'amulet' }],
         ['occult', 'Тряпичная кукла', 'На ткани видны следы воска и три узла из красной нити.', { objectKind: 'doll' }],
         ['occult', 'Кристалл с рунами', 'Грани исписаны неизвестными знаками. Магическая природа пока лишь гипотеза.', { objectKind: 'crystal' }],
@@ -636,6 +648,12 @@ function renderCrimeMapSvg(item) {
 function objectKind(item) {
     if (Object.hasOwn(EVIDENCE_ASSETS, item.metadata?.objectKind) || ['blood_bag', 'amulet', 'doll', 'crystal'].includes(item.metadata?.objectKind)) return item.metadata.objectKind;
     const text = `${item.title} ${item.subtitle}`.toLowerCase();
+    if (/гримуар|grimoire|spellbook/.test(text)) return 'grimoire';
+    if (/таро|tarot/.test(text)) return 'tarot';
+    if (/зель|potion|эликсир|elixir/.test(text)) return 'potion';
+    if (/череп|skull/.test(text)) return 'skull';
+    if (/спиритическ|ouija|spirit board/.test(text)) return 'spirit_board';
+    if (/магический шар|хрустальный шар|crystal ball/.test(text)) return 'crystal_ball';
     if (/патрон|гильз|cartridge|shotgun shell|\bammo\b/.test(text)) return 'cartridges';
     if (/складн.*нож|перочин|folding knife|pocket knife/.test(text)) return 'folding_knife';
     if (/нож|кинжал|\bknife\b|\bdagger\b/.test(text)) return 'knife';
@@ -994,7 +1012,7 @@ function renderFingerprintsView(item) {
             <div class="nb-fp-palm-col">
                 <div class="nb-fp-palm-frame">
                     <div class="nb-fp-mini-label">Полный оттиск ладони / следа (${escapeHtml(item.date || 'Экспертиза')})</div>
-                    ${renderFingerprintSvg(pattern === 'footprint' ? 'footprint' : 'palm', item.id, 5)}
+                    ${pattern === 'footprint' ? renderFingerprintSvg('footprint', item.id, 5) : `<img class="nb-palm-print" src="${escapeHtml(new URL('palm-print.png', NB_ASSET_BASE).href)}" alt="Иллюстративный отпечаток ладони">`}
                 </div>
             </div>
         </div>
@@ -1313,7 +1331,7 @@ async function generateDetectiveText({
 }
 
 /**
- * Generates an image using SillyTavern's built-in /sd slash command or image generation pipeline.
+ * URL validation helpers for image assets and direct image requests.
  */
 function safeWebUrl(value) {
     try { const url = new URL(String(value || '')); return url.protocol === 'https:' ? url.href : ''; } catch { return ''; }
@@ -1337,59 +1355,47 @@ function extractGeneratedImage(response) {
     return candidates.map(safeImageUrl).find(Boolean) || '';
 }
 
-async function generateWithSillyImages(prompt, loadModule = path => import(path)) {
-    let pipeline, utils;
-    try {
-        [pipeline, utils] = await Promise.all([
-            loadModule('/scripts/extensions/third-party/sillyimages/src/pipeline.js'),
-            loadModule('/scripts/extensions/third-party/sillyimages/src/utils.js'),
-        ]);
-    } catch { throw new Error('SillyImages не найден. Установите 0xl0cal/sillyimages в папку sillyimages и настройте его активный профиль.'); }
-    if (typeof pipeline.generateImageWithRetry !== 'function' || typeof utils.saveImageToFile !== 'function') {
-        throw new Error('Эта версия SillyImages не поддерживает ожидаемый API. Обновите расширение.');
-    }
-    const generated = await pipeline.generateImageWithRetry(prompt, '', undefined, {});
-    if (typeof generated !== 'string' || !safeImageUrl(generated)) throw new Error('SillyImages не вернул поддерживаемое изображение (видео не поддерживается).');
-    return generated.startsWith('data:') ? await utils.saveImageToFile(generated, { mode: 'noirboard' }) : generated;
+const imageSession = { key: '', endpoint: '' };
+
+function imageEndpoint(value) {
+    let url;
+    try { url = new URL(String(value || '').trim()); } catch { throw new Error('Укажите адрес API, например https://example.com/v1'); }
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new Error('Для API требуется HTTPS; HTTP разрешён только для localhost.');
+    if (url.username || url.password || url.search || url.hash) throw new Error('Адрес API не должен содержать ключи, параметры или пароль.');
+    url.pathname = url.pathname.replace(/\/+$/, '');
+    if (!url.pathname.endsWith('/images/generations')) url.pathname += '/images/generations';
+    return url.href;
 }
 
-async function generateEvidenceImage({ getContextFn, prompt, settings = {} }) {
-    if (!prompt || !prompt.trim()) return '';
-    const ctx = typeof getContextFn === 'function' ? getContextFn() : globalThis.SillyTavern?.getContext?.() || {};
+function setImageSessionKey(key, endpoint) {
+    imageSession.key = String(key || '').trim();
+    imageSession.endpoint = imageSession.key ? imageEndpoint(endpoint) : '';
+}
 
-    const backend = settings.imageBackend || (settings.imageProfileId ? 'connection' : 'tavern');
-    if (backend === 'sillyimages') return await generateWithSillyImages(prompt);
-    if (backend === 'connection' && settings.imageProfileId) {
-        const service = ctx.ConnectionManagerRequestService || globalThis.ConnectionManagerRequestService;
-        if (!service?.sendRequest) throw new Error('Connection Manager недоступен. Профиль изображений не переключался.');
-        const response = await service.sendRequest(settings.imageProfileId,
-            [{ role: 'user', content: `Generate an image, not a textual description: ${prompt}` }],
-            4096, { stream: false, extractData: false, includePreset: true, includeInstruct: false },
-            { request_images: true });
-        const url = extractGeneratedImage(response);
-        if (!url) throw new Error('Профиль не вернул изображение. Нужна модель с генерацией картинок через Chat Completions, например совместимая Gemini image-модель.');
-        if (!url.startsWith('data:')) return url;
-        const save = ctx.saveBase64AsFile || (await import('/scripts/utils.js')).saveBase64AsFile;
-        const [, extension, data] = url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
-        return await save(data, 'NoirBoard', uid('evidence'), extension);
-    }
-
-    if (typeof ctx.executeSlashCommandsWithOptions === 'function') {
+async function generateEvidenceImage({ getContextFn, prompt, settings = {}, fetchFn = globalThis.fetch }) {
+    if (!prompt?.trim()) return '';
+    const endpoint = imageEndpoint(settings.imageApiUrl);
+    if (!settings.imageModel?.trim()) throw new Error('Укажите модель изображений в настройках NoirBoard.');
+    if (imageSession.key && imageSession.endpoint !== endpoint) throw new Error('Адрес API изменён. Введите ключ заново для нового адреса.');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180000);
+    try {
+        let response;
         try {
-            const cleanPrompt = prompt.replace(/["\\|{}\r\n]+/g, ' ').trim();
-            const result = await ctx.executeSlashCommandsWithOptions(`/sd quiet=true "${cleanPrompt}"`, {
-                handleParserFlags: true,
-                handleExecutionErrors: true,
-            });
-            const pipe = typeof result === 'string' ? result.trim() : String(result?.pipe || '').trim();
-            if (pipe && (pipe.startsWith('/') || pipe.startsWith('http') || pipe.startsWith('data:image'))) {
-                return pipe;
-            }
-        } catch (err) {
-            console.warn('[NoirBoard] /sd image generation failed:', err);
-        }
-    }
-    return '';
+            response = await fetchFn(endpoint, { method: 'POST', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', signal: controller.signal,
+                headers: { 'Content-Type': 'application/json', ...(imageSession.key ? { Authorization: 'Bearer ' + imageSession.key } : {}) },
+                body: JSON.stringify({ model: settings.imageModel.trim(), prompt, n: 1, size: '1024x1024' }) });
+        } catch { throw new Error(controller.signal.aborted ? 'Время ожидания изображения истекло.' : 'Запрос изображения не выполнен. Проверьте адрес, доступность сервера и поддержку CORS.'); }
+        if (!response.ok) throw new Error('API изображений: HTTP ' + response.status + '. Проверьте ключ, модель и баланс.');
+        const data = await response.json();
+        const url = extractGeneratedImage(data);
+        if (!url) throw new Error('API не вернул изображение в формате OpenAI Images (data[].url или b64_json).');
+        if (!url.startsWith('data:')) return url;
+        const ctx = getContextFn ? getContextFn() : globalThis.SillyTavern?.getContext?.() || {};
+        const save = ctx.saveBase64AsFile || (await import('/scripts/utils.js')).saveBase64AsFile;
+        const [, extension, bytes] = url.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
+        return await save(bytes, 'NoirBoard', uid('image'), extension);
+    } finally { clearTimeout(timer); }
 }
 
 function commonsImageRecord(page) {
@@ -1842,6 +1848,7 @@ function createNoirBoardUI({ storage }) {
     let terminalOpen = false;
     let searchController = null;
     let summaryDraft = null;
+    let deductionDraft = null;
     let isOpen = false;
     let activeTab = 'desk';
     let activeTypeFilter = 'all';
@@ -1893,6 +1900,7 @@ function createNoirBoardUI({ storage }) {
     function close() {
         cancelSearch();
         summaryDraft = null;
+        deductionDraft = null;
         if (!rootEl) return;
         isOpen = false;
         inspectedItemId = null;
@@ -1928,7 +1936,7 @@ function createNoirBoardUI({ storage }) {
         const currentCase = storage.getCurrentCase();
         const modeInfo = MODES[settings.mode] || MODES.standard;
         const chatKey = storage.getCurrentChatKey();
-        if (selectionChatKey !== chatKey) { selectedItems.clear(); summaryDraft = null; cancelSearch(); selectionChatKey = chatKey; }
+        if (selectionChatKey !== chatKey) { selectedItems.clear(); summaryDraft = null; deductionDraft = null; cancelSearch(); selectionChatKey = chatKey; }
         for (const id of selectedItems) if (!currentCase.items.some(item => item.id === id)) selectedItems.delete(id);
 
         rootEl.setAttribute('data-nb-mode', settings.mode);
@@ -1986,6 +1994,7 @@ function createNoirBoardUI({ storage }) {
             ${inspectedItemId ? renderInspectorModal(currentCase, settings) : ''}
             ${isSettingsOpen ? renderSettingsModal(currentCase, settings) : ''}
             ${isAddModalOpen ? renderAddItemModal(settings) : ''}
+            ${deductionDraft ? `<div class="nb-submodal-backdrop"><div class="nb-settings-modal"><header class="nb-submodal-header"><h3>Моё дедуктивное заключение</h3><button type="button" class="nb-btn nb-act-cancel-deduction">Отмена</button></header><div class="nb-settings-body"><p>Факты → предположения → выводы → что проверить. Текст сохраняется в текущем деле без запроса к ИИ.</p><textarea id="nb-manual-deduction" class="nb-textarea" rows="12">${escapeHtml(deductionDraft.text)}</textarea></div><footer class="nb-submodal-footer"><button type="button" class="nb-btn nb-act-save-deduction">Сохранить заключение</button><button type="button" class="nb-btn nb-act-draft-deduction">В чат без ИИ</button></footer></div></div>` : ''}
             ${summaryDraft ? `<div class="nb-submodal-backdrop"><div class="nb-settings-modal"><header class="nb-submodal-header"><h3>Краткие выводы для чата</h3><button type="button" class="nb-btn nb-act-close-summary">Закрыть</button></header><div class="nb-settings-body"><p>Только текст, без приложенных материалов. Проверьте и отредактируйте перед отправкой.</p><textarea id="nb-summary-draft" class="nb-textarea" rows="10">${escapeHtml(summaryDraft.text)}</textarea></div><footer class="nb-submodal-footer"><button type="button" class="nb-btn nb-btn-primary nb-act-send-summary">Поместить в поле сообщения</button></footer></div></div>` : ''}
         </div>`;
 
@@ -2028,6 +2037,7 @@ function createNoirBoardUI({ storage }) {
                     <button type="button" class="nb-btn nb-act-load-demo" ${isBusy ? 'disabled' : ''}>Показать демо</button>
                     <button type="button" class="nb-btn nb-act-remove-demo" ${isBusy || !currentCase.items.some(item => item.isDemo) ? 'disabled' : ''}>Убрать демо</button>
                     <button type="button" class="nb-btn nb-act-case-summary" ${isBusy || !currentCase.items.length ? 'disabled' : ''}>Выводы в чат</button>
+                    <button type="button" class="nb-btn nb-act-edit-deduction" ${isBusy ? 'disabled' : ''}>Моё заключение</button>
                     ${settings.mode === 'modern' && !terminalOpen ? '<button type="button" class="nb-btn nb-act-open-terminal">Открыть поиск</button>' : ''}
                 </div>
                 <div class="nb-filter-scroll">${typeFiltersHtml}</div>
@@ -2121,6 +2131,7 @@ function createNoirBoardUI({ storage }) {
                     </button>
                 </div>
                 <div class="nb-wall-tools-right">
+                    <button type="button" class="nb-btn nb-act-edit-deduction" ${isBusy ? 'disabled' : ''}>Написать заключение</button>
                     <button type="button" class="nb-btn nb-btn-primary nb-act-wall-deduce" ${isBusy ? 'disabled' : ''} title="Попросить ИИ проанализировать закреплённые улики и протянутые нити">
                         <i class="fa-solid fa-brain"></i> Дедукция ИИ по стене
                     </button>
@@ -2273,10 +2284,7 @@ function createNoirBoardUI({ storage }) {
             ...profiles.map(p => `<option value="${escapeHtml(p.id)}" ${settings.textProfileId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.model ? ` (${escapeHtml(p.model)})` : ''}</option>`),
         ].join('');
 
-        const imageProfileOptions = [
-            `<option value="" ${!settings.imageProfileId ? 'selected' : ''}>Image Generation в SillyTavern (/sd)</option>`,
-            ...profiles.map(p => `<option value="${escapeHtml(p.id)}" ${settings.imageProfileId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.model ? ` — ${escapeHtml(p.model)}` : ''}</option>`),
-        ].join('');
+
 
         const modeCardsHtml = Object.values(MODES).map(m => `
             <label class="nb-mode-option ${settings.mode === m.id ? 'is-selected' : ''}">
@@ -2299,13 +2307,12 @@ function createNoirBoardUI({ storage }) {
 
         return renderSettingsModalMarkup(settings, {
             profileOptions,
-            imageProfileOptions,
             modeCardsHtml,
             typesChecklistHtml,
         });
     }
 
-    function renderSettingsModalMarkup(settings, { profileOptions, imageProfileOptions, modeCardsHtml, typesChecklistHtml }) {
+    function renderSettingsModalMarkup(settings, { profileOptions, modeCardsHtml, typesChecklistHtml }) {
         return `
         <div class="nb-submodal-backdrop">
             <div class="nb-settings-modal">
@@ -2321,23 +2328,23 @@ function createNoirBoardUI({ storage }) {
 
                     <section class="nb-settings-group">
                         <h4>2. Профили подключения (Connection Profiles)</h4>
-                        <p class="nb-settings-hint"><i class="fa-solid fa-shield-halved"></i> Расширение использует только публичные названия профилей SillyTavern и никогда не читает и не затрагивает ваши API-ключи.</p>
+                        <p class="nb-settings-hint"><i class="fa-solid fa-shield-halved"></i> Для текста используются публичные данные профилей SillyTavern, без чтения их ключей. Отдельный ключ изображений вводится вами и используется только для указанного API.</p>
                         <div class="nb-form-grid">
                             <div class="nb-field">
                                 <label for="nb-set-text-profile">Профиль для генерации текста и улик:</label>
                                 <select id="nb-set-text-profile" class="nb-select">${profileOptions}</select>
                             </div>
                             <div class="nb-field">
-                                <label for="nb-set-image-profile">Генератор изображений:</label>
-                                <select id="nb-set-image-backend" class="nb-select" aria-label="Способ генерации изображений">
-                                    <option value="tavern" ${settings.imageBackend === 'tavern' ? 'selected' : ''}>Штатный Image Generation (/sd)</option>
-                                    <option value="sillyimages" ${settings.imageBackend === 'sillyimages' ? 'selected' : ''}>SillyImages — его активный профиль</option>
-                                    <option value="connection" ${settings.imageBackend === 'connection' ? 'selected' : ''}>Connection Profile (совместимость с 1.2)</option>
-                                </select>
-                                <select id="nb-set-image-profile" class="nb-select">${imageProfileOptions}</select>
-                                <small class="nb-settings-hint">Для /sd настройте Image Generation в таверне. Для SillyImages установите 0xl0cal/sillyimages и выберите профиль в нём. Список ниже используется только в режиме Connection Profile. NoirBoard не читает настройки ключей SillyImages. Его собственные настройки могут добавлять референсы и описание персонажа в запрос.</small>
-                                <small class="nb-settings-hint">Профиль должен поддерживать вывод изображений через Chat Completions (например, совместимая Gemini image-модель). Обычная текстовая модель картинку не создаст. Ключами управляет только SillyTavern.</small>
+                                <label for="nb-set-image-url">Адрес API (OpenAI-совместимый Images):</label>
+                                <input id="nb-set-image-url" class="nb-input" type="url" value="${escapeHtml(settings.imageApiUrl)}" placeholder="https://example.com/v1">
+                                <label for="nb-set-image-key">API-ключ (только на время этой вкладки):</label>
+                                <input id="nb-set-image-key" class="nb-input" type="password" autocomplete="new-password" placeholder="${imageSession.key ? 'Ключ уже введён; пустое поле — оставить' : 'Введите ключ'}">
+                                <label class="nb-type-check"><input id="nb-clear-image-key" type="checkbox">Забыть введённый ключ</label>
+                                <label for="nb-set-image-model">Модель:</label>
+                                <input id="nb-set-image-model" class="nb-input" value="${escapeHtml(settings.imageModel)}" placeholder="Название image-модели">
+                                <small class="nb-settings-hint">Ключ не сохраняется в настройках, localStorage или экспорте. После перезагрузки введите его снова. Запрос идёт напрямую на указанный адрес; требуется CORS. Не используйте ключ для недоверенного сервера. Другие расширения страницы не являются изолированной средой.</small>
                             </div>
+
                             <div class="nb-field">
                                 <label for="nb-set-image-source">Откуда брать иллюстрации:</label>
                                 <select id="nb-set-image-source" class="nb-select">
@@ -2398,6 +2405,8 @@ function createNoirBoardUI({ storage }) {
 
                     <section class="nb-settings-group">
                         <h4>5. Дополнительные инструкции для ИИ</h4>
+                        <label class="nb-type-check"><input type="checkbox" id="nb-set-hide-conclusions" ${settings.hideChatConclusions ? 'checked' : ''}>Скрывать отправленные выводы NoirBoard в переписке (оставлять в контексте ИИ)</label>
+                        <p class="nb-settings-hint">Работает для новых сообщений, подготовленных кнопкой NoirBoard. Старые и посторонние сообщения не затрагиваются. Выключите настройку, чтобы снова показать выводы.</p>
                         <textarea id="nb-set-custom-prompt" class="nb-textarea" rows="2" placeholder="Например: Сделай упор на нуар 1940-х годов, мафиозный клан Коза Ностра и финансовые махинации...">${escapeHtml(settings.customPromptInstructions)}</textarea>
                     </section>
 
@@ -2564,6 +2573,7 @@ function createNoirBoardUI({ storage }) {
         if (isBusy) return;
         const settings = storage.getSettings();
         const currentCase = storage.getCurrentCase();
+        if (currentCase.deduction && !window.confirm('Заменить сохранённое заключение новым анализом ИИ?')) return;
         const chatKey = storage.getCurrentChatKey();
         setBusy(true, 'Дедуктивный анализ связей...');
         try {
@@ -2644,8 +2654,15 @@ function createNoirBoardUI({ storage }) {
         }
 
         settings.textProfileId = rootEl.querySelector('#nb-set-text-profile')?.value || '';
-        settings.imageProfileId = rootEl.querySelector('#nb-set-image-profile')?.value || '';
-        settings.imageBackend = rootEl.querySelector('#nb-set-image-backend')?.value || 'tavern';
+        const apiUrl = rootEl.querySelector('#nb-set-image-url')?.value.trim() || '';
+        const key = rootEl.querySelector('#nb-set-image-key')?.value.trim() || '';
+        if (apiUrl) { try { imageEndpoint(apiUrl); } catch (error) { notify('error', error.message); return; } }
+        if (key && !apiUrl) { notify('error', 'Сначала укажите адрес API.'); return; }
+        if (rootEl.querySelector('#nb-clear-image-key')?.checked || apiUrl !== settings.imageApiUrl) setImageSessionKey('', '');
+        if (key) setImageSessionKey(key, apiUrl);
+        settings.imageApiUrl = apiUrl;
+        settings.imageModel = rootEl.querySelector('#nb-set-image-model')?.value.trim() || '';
+        settings.hideChatConclusions = Boolean(rootEl.querySelector('#nb-set-hide-conclusions')?.checked);
         settings.imageSource = rootEl.querySelector('#nb-set-image-source')?.value || 'generated';
         settings.itemsPerScan = Math.max(1, Math.min(10, Number(rootEl.querySelector('#nb-set-items-count')?.value) || 4));
         settings.contextMessagesLimit = Math.max(3, Math.min(150, Number(rootEl.querySelector('#nb-set-context-limit')?.value) || 25));
@@ -2665,6 +2682,7 @@ function createNoirBoardUI({ storage }) {
         });
 
         storage.saveSettings();
+        refreshConclusionVisibility(storage.getContext());
         isSettingsOpen = false;
         notify('success', 'Настройки NoirBoard сохранены.');
         render();
@@ -2761,6 +2779,18 @@ function createNoirBoardUI({ storage }) {
         rootEl.addEventListener('click', async e => {
             const target = e.target;
             if (!(target instanceof Element)) return;
+            if (target.closest('.nb-act-edit-deduction')) {
+                if (isBusy) return;
+                deductionDraft = { chatKey: storage.getCurrentChatKey(), text: storage.getCurrentCase().deduction }; render(); return;
+            }
+            if (target.closest('.nb-act-cancel-deduction')) { deductionDraft = null; render(); return; }
+            if (target.closest('.nb-act-save-deduction') || target.closest('.nb-act-draft-deduction')) {
+                if (!deductionDraft || deductionDraft.chatKey !== storage.getCurrentChatKey()) return;
+                const text = rootEl.querySelector('#nb-manual-deduction').value.trim();
+                const data = storage.getCurrentCase(); data.deduction = text; storage.saveCurrentCase(data);
+                if (target.closest('.nb-act-draft-deduction') && text) summaryDraft = { chatKey: deductionDraft.chatKey, text };
+                deductionDraft = null; render(); return;
+            }
             if (target.closest('.nb-act-select-visible')) {
                 storage.getCurrentCase().items.filter(item => activeTypeFilter === 'all' || item.type === activeTypeFilter).forEach(item => selectedItems.add(item.id)); render(); return;
             }
@@ -2789,6 +2819,8 @@ function createNoirBoardUI({ storage }) {
                 if (!input) { notify('error', 'Поле ввода чата не найдено. Скопируйте сводку вручную.'); return; }
                 if (input.value.trim() && !window.confirm('Заменить текущий черновик в поле чата сводкой?')) return;
                 input.value = rootEl.querySelector('#nb-summary-draft').value;
+                if (!input.value.trim()) { notify('warning', 'Заключение пустое.'); return; }
+                stageConclusion(storage.getContext(), storage.getCurrentChatKey(), input.value);
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 summaryDraft = null; close(); input.focus();
                 notify('success', 'Сводка в поле чата. Отправьте её обычной кнопкой отправки.'); return;
@@ -3255,7 +3287,9 @@ function createNoirBoardUI({ storage }) {
     document.addEventListener('keydown', e => {
         if (!isOpen || e.key !== 'Escape') return;
         e.preventDefault();
-        if (isSettingsOpen) isSettingsOpen = false;
+        if (deductionDraft) deductionDraft = null;
+        else if (summaryDraft) summaryDraft = null;
+        else if (isSettingsOpen) isSettingsOpen = false;
         else if (isAddModalOpen) isAddModalOpen = false;
         else if (inspectedItemId) inspectedItemId = null;
         else { close(); return; }
@@ -3410,14 +3444,55 @@ function registerSlashCommands(ui) {
     }
 }
 
+let pendingConclusion = null;
+
+function stageConclusion(ctx, chatKey, text) {
+    pendingConclusion = { chat: ctx.chat, chatKey, text: text.trim(), count: ctx.chat?.length || 0 };
+}
+
+function markSentConclusion(ctx, messageId) {
+    if (!pendingConclusion) return false;
+    const pending = pendingConclusion;
+    pendingConclusion = null;
+    const message = ctx.chat?.[Number(messageId)];
+    const key = createStorageManager(() => ctx).getCurrentChatKey();
+    if (pending.chat !== ctx.chat || pending.chatKey !== key || Number(messageId) < pending.count || !message?.is_user || message.mes?.trim() !== pending.text) return false;
+    message.extra = { ...(message.extra || {}), noirboardConclusion: true };
+    return true;
+}
+
+function refreshConclusionVisibility(ctx) {
+    if (typeof document === 'undefined') return;
+    const hide = ctx.extensionSettings?.[MODULE_NAME]?.hideChatConclusions === true;
+    document.querySelectorAll('#chat .mes[mesid]').forEach(element => {
+        const message = ctx.chat?.[Number(element.getAttribute('mesid'))];
+        element.classList.toggle('nb-hidden-conclusion', hide && message?.extra?.noirboardConclusion === true);
+    });
+}
+
 function bindTavernEvents(ui) {
     const ctx = globalThis.SillyTavern?.getContext?.() || {};
     const { eventSource, event_types } = ctx;
     if (eventSource && event_types?.CHAT_CHANGED) {
         eventSource.on(event_types.CHAT_CHANGED, () => {
+            pendingConclusion = null;
             ui.render();
+            refreshConclusionVisibility(globalThis.SillyTavern.getContext());
         });
     }
+    if (eventSource && event_types?.MESSAGE_SENT) eventSource.on(event_types.MESSAGE_SENT, id => {
+        markSentConclusion(globalThis.SillyTavern.getContext(), id);
+    });
+    if (eventSource && event_types?.USER_MESSAGE_RENDERED) eventSource.on(event_types.USER_MESSAGE_RENDERED, async () => {
+        const current = globalThis.SillyTavern.getContext();
+        refreshConclusionVisibility(current);
+        if (current.chat?.some(message => message.extra?.noirboardConclusion)) {
+            try { await current.saveChat?.(); } catch { console.warn('[NoirBoard] Не удалось сохранить метку заключения.'); }
+        }
+    });
+    const chat = document.getElementById('chat');
+    if (chat) new MutationObserver(() => refreshConclusionVisibility(globalThis.SillyTavern.getContext())).observe(chat, { childList: true, subtree: true });
+    refreshConclusionVisibility(ctx);
 }
 
 if (typeof jQuery !== 'undefined') {

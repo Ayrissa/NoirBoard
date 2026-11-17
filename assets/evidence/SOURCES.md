@@ -32,3 +32,24 @@ Reproduce on Windows with System.Drawing:
 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-evidence.ps1 -SourceDirectory <original-collection>`
 This only bypasses execution policy for the processing process; it does not change
 the machine's persistent policy. The script expects the exact 13-file source set.
+
+## Second owner-provided collection (1.5.0)
+
+The same unknown-source/license notice above applies to these images. Exterior
+background removed; palm print converted to an ink-alpha image. Originals remain
+outside this repository. Run `scripts/prepare-mystic.ps1 -SourceDirectory <collection>`
+on the corresponding ten-file collection, using the same process-local execution
+policy option if needed.
+
+| Output | Original filename |
+|---|---|
+| grimoire.png | Corvina Clemm ✩ Gothikana.jpg |
+| tarot.png | Display of a Tarot Deck Featuring _THE WORLD_ Card on a Clean Background.jpg |
+| palm-print.png | Inkt afdruk.jpg |
+| potion.png | purple potion bottle.jpg |
+| blood-bag.png | загружено (54).jpg |
+| skull.png | загружено (55).jpg |
+| spirit-board.png | загружено (56).jpg |
+| crystal-ball.png | загружено (57).jpg |
+| amulet.png | загружено (58).jpg |
+| crystal.png | загружено (59).jpg |
