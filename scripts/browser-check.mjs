@@ -11,7 +11,7 @@ if (!existsSync(browser)) throw Error('Set NOIRBOARD_BROWSER to a Chromium brows
 const source = readFileSync(path.join(root, 'index.js'), 'utf8');
 const css = readFileSync(path.join(root, 'style.css'), 'utf8');
 
-function browserTests(mode, view, viewportWidth, viewportHeight) {
+async function browserTests(mode, view, viewportWidth, viewportHeight) {
     const results = [];
     const check = (name, condition) => { results.push({ name, pass: Boolean(condition) }); };
     const click = selector => {
@@ -24,7 +24,7 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
         return rect.left >= -1 && rect.right <= viewportWidth + 1 && rect.top >= -1 && rect.bottom <= viewportHeight + 1;
     };
     try {
-        const ctx = { extensionSettings: {}, characterId: 0, characters: [{ avatar: 'test.png', name: 'Detective' }], chatId: 'test', saveSettingsDebounced() {} };
+        const ctx = { extensionSettings: {}, characterId: 0, characters: [{ avatar: 'test.png', name: 'Detective' }], chatId: 'test', saveSettingsDebounced() {}, generateRaw: async () => '{"results":[{"title":"Simulated result"}]}' };
         const storage = createStorageManager(() => ctx);
         storage.getSettings().mode = mode;
         const ui = createNoirBoardUI({ storage });
@@ -33,7 +33,26 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('desk grid is active', getComputedStyle(document.querySelector('.nb-desk-grid')).display === 'grid');
         check('main window fits viewport', fits(document.querySelector('.nb-window')));
         check('desk has no horizontal overflow', document.querySelector('.nb-desk-surface').scrollWidth <= document.querySelector('.nb-desk-surface').clientWidth + 1);
-        const current = storage.getCurrentCase();
+        let current = storage.getCurrentCase();
+        const demoExpected = mode === 'supernatural' ? 13 : 10;
+        check('demo preserves existing evidence', current.items.filter(item => item.isDemo).length === demoExpected);
+        click('.nb-act-load-demo');
+        check('demo repeat is idempotent', storage.getCurrentCase().items.filter(item => item.isDemo).length === demoExpected);
+        click('.nb-act-select-visible');
+        check('visible materials selected', !document.querySelector('.nb-act-delete-selected').disabled);
+        window.confirm = () => true;
+        click('.nb-act-delete-selected');
+        check('bulk deletion removes materials and pins', storage.getCurrentCase().items.length === 0 && storage.getCurrentCase().nodes.length === 0);
+        click('.nb-act-load-demo');
+        current = storage.getCurrentCase();
+        const personalItem = normalizeItem({ title: 'Personal evidence', content: 'An observed fact.', metadata: { hiddenDetail: 'Test hidden detail' } });
+        current.items.push(personalItem);
+        storage.saveCurrentCase(current);
+        ui.render();
+        click('.nb-act-remove-demo');
+        check('remove demo retains personal evidence', storage.getCurrentCase().items.length === 1 && storage.getCurrentCase().items[0].id === personalItem.id);
+        click('.nb-act-load-demo');
+        current = storage.getCurrentCase();
         for (const type of Object.keys(ITEM_TYPES)) {
             if (!current.items.some(item => item.type === type)) current.items.push(normalizeItem({ type, title: 'Материал расследования', content: 'Первый абзац.\n\nВторой абзац.\n\nТретий абзац.', metadata: {} }));
         }
@@ -60,6 +79,7 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('document uses complete theme palette', paperColor === ({ standard: 'rgb(229, 208, 167)', modern: 'rgb(16, 44, 71)', supernatural: 'rgb(211, 188, 223)' })[mode]);
         click('.nb-act-close-inspector');
         click('.nb-act-open-settings');
+        check('image backend modes available', ['tavern', 'sillyimages', 'connection'].every(value => [...document.querySelector('#nb-set-image-backend').options].some(option => option.value === value)));
         const body = document.querySelector('.nb-settings-body');
         check('settings fits viewport', fits(document.querySelector('.nb-settings-modal')));
         check('settings no horizontal overflow', body.scrollWidth <= body.clientWidth + 1);
@@ -82,6 +102,38 @@ function browserTests(mode, view, viewportWidth, viewportHeight) {
         ui.close(); ui.open('wall');
         const restored = [...document.querySelectorAll('.nb-wall-node')].find(el => el.dataset.nodeId === nodeId);
         check('drag survives reopening board', parseInt(restored.style.left) === startX + 80);
+        ui.open('desk');
+        const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+        if (mode === 'modern') {
+            click('.nb-act-open-terminal');
+            document.querySelector('#nb-modern-search-input').value = 'station';
+            click('.nb-act-modern-search');
+            await flush();
+            check('search displays response', Boolean(document.querySelector('.nb-terminal-hit')));
+            click('.nb-act-cancel-search');
+            check('terminal closes', !document.querySelector('.nb-modern-terminal'));
+            let resolveSearch;
+            ctx.generateRaw = () => new Promise(resolve => { resolveSearch = resolve; });
+            const count = storage.getCurrentCase().searchHistory.length;
+            click('.nb-act-open-terminal');
+            document.querySelector('#nb-modern-search-input').value = 'cancel this';
+            click('.nb-act-modern-search');
+            await flush();
+            click('.nb-act-cancel-search');
+            resolveSearch('{"results":[{"title":"Cancelled"}]}');
+            await flush();
+            check('cancelled search not saved', storage.getCurrentCase().searchHistory.length === count);
+        }
+        ctx.generateRaw = async () => 'The detective formed a hypothesis based on the report.';
+        const chatInput = document.createElement('textarea'); chatInput.id = 'send_textarea'; document.body.appendChild(chatInput);
+        click('.nb-act-case-summary'); await flush();
+        check('summary preview opens', Boolean(document.querySelector('#nb-summary-draft')));
+        click('.nb-act-close-summary');
+        check('summary preview closes', !document.querySelector('#nb-summary-draft'));
+        click('.nb-act-case-summary'); await flush();
+        click('.nb-act-send-summary');
+        check('summary goes to chat draft only', chatInput.value.includes('hypothesis') && !ctx.chat?.length);
+        ui.open(view === 'wall' ? 'wall' : 'desk');
         if (view !== 'wall') {
             click('[data-nb-tab="desk"]');
             if (view === 'settings') click('.nb-act-open-settings');

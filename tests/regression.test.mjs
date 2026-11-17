@@ -176,3 +176,72 @@ test('fingerprint ridge patterns differ and maps use context instead of hard-cod
     const map = app.renderCrimeMapSvg({ title: 'Town', metadata: { waterName: 'River' } });
     assert.match(map, /River/); assert.doesNotMatch(map, /LAKE FOREST/);
 });
+
+test('demo pack adds all evidence types without replacing existing items and is removable alone', () => {
+    const app = load();
+    const data = app.createEmptyCase('My case');
+    data.items.push(app.normalizeItem({ id: 'mine', title: 'My evidence' }));
+    const count = app.addDemoMaterials(data, 'standard').length;
+    assert.ok(count >= 10);
+    assert.equal(data.items.find(item => item.id === 'mine').title, 'My evidence');
+    assert.equal(app.addDemoMaterials(data, 'standard').length, 0);
+    app.addDemoMaterials(data, 'supernatural');
+    assert.ok(data.items.some(item => item.metadata.demoKey?.includes('Серебряный амулет')));
+    assert.equal(data.items.find(item => item.id === 'mine').isDemo, false);
+    data.deduction = 'Saved deduction';
+    app.addDemoMaterials(data, 'supernatural');
+    assert.equal(data.deduction, 'Saved deduction');
+    const mine = app.pinItemToCaseWall(data, data.items.find(item => item.id === 'mine'));
+    app.removeCaseItems(data, data.items.filter(item => item.isDemo).map(item => item.id));
+    assert.equal(data.items.length, 1);
+    assert.equal(data.nodes.length, 1);
+    assert.equal(data.nodes[0].id, mine.id);
+    assert.equal(data.connections.length, 0);
+});
+
+test('selected profile and backend normalization preserve compatibility', () => {
+    const app = load();
+    assert.equal(app.normalizeSettings({ imageProfileId: 'old-profile' }).imageBackend, 'connection');
+    assert.equal(app.normalizeSettings({ imageBackend: 'sillyimages' }).imageBackend, 'sillyimages');
+    assert.equal(app.normalizeSettings({ imageBackend: 'unknown' }).imageBackend, 'tavern');
+});
+
+test('object evidence uses item-specific SVGs instead of treating every exhibit as paper', () => {
+    const app = load();
+    for (const [name, kind] of [['weapon', 'pistol'], ['blood sample', 'blood_bag'], ['amulet', 'amulet'], ['cloth doll', 'doll'], ['crystal', 'crystal']]) {
+        const item = app.normalizeItem({ type: 'evidence_bag', title: name, metadata: { objectKind: kind } });
+        assert.match(app.renderObjectVisual(item), /<svg/);
+        assert.match(app.renderInspectorContent(item), /nb-doc-object/);
+    }
+});
+
+test('SillyImages calls exported pipeline without inserting inline media into the chat', async () => {
+    const app = load();
+    let called = false;
+    const loadModule = async path => path.endsWith('pipeline.js')
+        ? { generateImageWithRetry: async (prompt, style, callback, options) => { called = true; assert.equal(prompt, 'amulet'); assert.equal(options.messageId, undefined); return 'data:image/png;base64,AAAA'; } }
+        : { saveImageToFile: async data => { assert.equal(data, 'data:image/png;base64,AAAA'); return '/images/amulet.png'; } };
+    assert.equal(await app.generateWithSillyImages('amulet', loadModule), '/images/amulet.png');
+    assert.ok(called);
+    await assert.rejects(app.generateWithSillyImages('amulet', async () => { throw Error('missing'); }), /SillyImages не найден/);
+});
+
+test('modern search abort signal prevents applying a late response', async () => {
+    const app = load();
+    const controller = new AbortController();
+    const context = { chat: [], generateRaw: async () => new Promise(resolve => setTimeout(() => resolve('{"results":[{"title":"Late result"}]}'), 5)) };
+    const currentCase = app.createEmptyCase();
+    const pending = app.runModernSearch({ getContextFn: () => context, settings: {}, currentCase, query: 'query', signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending);
+    assert.equal(currentCase.searchHistory.length, 0);
+});
+
+test('image credits retain attribution but render no duplicate pictures', () => {
+    const app = load();
+    const html = app.renderImageGallery({ id: 'evidence', images: [{ source: 'commons', title: 'Photo', author: 'Photographer', license: 'CC BY 4.0', url: 'https://upload.wikimedia.org/example.png', pageUrl: 'https://commons.wikimedia.org/wiki/File:Example.png' }] });
+    assert.match(html, /Photographer/);
+    assert.match(html, /CC BY 4.0/);
+    assert.match(html, /<details/);
+    assert.doesNotMatch(html, /<img/);
+});

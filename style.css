@@ -2186,6 +2186,43 @@
 }
 #noirboard-modal-overlay .nb-window :is(.nb-folder-top-row, .nb-folder-two-cols,
     .nb-folder-field, .nb-folder-title-line, .nb-classified-header, .nb-news-masthead) { border-color: var(--nb-sheet-border); }
+
+/* 1.3 — selection, physical exhibits and computer file explorer. */
+#noirboard-modal-overlay .nb-desk-management { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+#noirboard-modal-overlay .nb-desk-management .nb-btn { font-size: 12px; padding: 7px 10px; }
+#noirboard-modal-overlay .nb-material-select { display: flex; align-items: center; gap: 8px; font: 12px/1.4 'Segoe UI', sans-serif; margin-bottom: 8px; cursor: pointer; }
+#noirboard-modal-overlay .nb-desk-card.is-selected { outline: 3px solid var(--nb-accent); outline-offset: 5px; }
+#noirboard-modal-overlay .nb-card-object-preview { height: 190px; display: flex; align-items: center; justify-content: center; }
+#noirboard-modal-overlay :is(.nb-object-svg, .nb-object-cutout) { width: 100%; height: 100%; max-width: 420px; object-fit: contain; filter: drop-shadow(5px 12px 8px #0008); }
+#noirboard-modal-overlay .nb-doc-object { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+#noirboard-modal-overlay .nb-object-stage { min-height: 320px; position: relative; display: flex; align-items: center; justify-content: center; padding: 24px 16px 50px; background: radial-gradient(ellipse, var(--nb-bg-surface), var(--nb-bg-dark)); border: 1px solid var(--nb-border); }
+#noirboard-modal-overlay .nb-object-stage :is(svg, img) { height: 300px; }
+#noirboard-modal-overlay .nb-object-label { position: absolute; bottom: 12px; right: 16px; padding: 5px 14px; background: var(--nb-sheet); color: var(--nb-sheet-ink); transform: rotate(-4deg); font-family: monospace; }
+#noirboard-modal-overlay .nb-object-record { padding: 22px; background: var(--nb-sheet); color: var(--nb-sheet-ink); border: 1px solid var(--nb-sheet-border); line-height: 1.7; min-width: 0; }
+#noirboard-modal-overlay .nb-window :is(.nb-desk-card--occult, .nb-desk-card--evidence_bag) { background: transparent; border: none; box-shadow: none; color: var(--nb-text); }
+#noirboard-modal-overlay :is(.nb-desk-card--occult, .nb-desk-card--evidence_bag)::before { display: none; }
+#noirboard-modal-overlay .nb-window :is(.nb-desk-card--occult, .nb-desk-card--evidence_bag) .nb-desk-badge { color: var(--nb-text); }
+#noirboard-modal-overlay .nb-image-credits { margin-top: 20px; padding: 10px 14px; border-top: 1px solid var(--nb-border); color: var(--nb-text-muted); font: 12px/1.6 'Segoe UI', sans-serif; overflow-wrap: anywhere; }
+#noirboard-modal-overlay .nb-image-credits summary { cursor: pointer; }
+#noirboard-modal-overlay .nb-image-credits a { color: var(--nb-accent); }
+#noirboard-modal-overlay .nb-image-credits .nb-image-choice { width: auto; padding: 5px 10px; color: var(--nb-text); margin-left: 8px; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-surface::before { content: 'NOIR OS  /  Архив расследования  /  Файлы'; padding: 10px 16px; border: 1px solid var(--nb-border); background: #132d46; border-radius: 5px; letter-spacing: 1px; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-grid { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); gap: 18px; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card { padding: 14px; min-height: 235px; background: #102b44; border: 1px solid #3b678d; border-top: 5px solid #5998c7; border-radius: 4px; box-shadow: 0 4px 10px #0005; color: #d6edff; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card::before { display: block; content: '▤  DOCUMENT'; position: static; width: auto; height: auto; transform: none; background: transparent; box-shadow: none; font: 12px/1.5 Consolas, monospace; color: #81bfea; padding-bottom: 8px; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card--dossier::before { content: '▰  CASE FOLDER'; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card--photo::before { content: '▧  IMAGE FILE'; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card--evidence_bag::before { content: '◈  EVIDENCE RECORD'; }
+#noirboard-modal-overlay .nb-mode-modern .nb-desk-card-title { font: 16px/1.35 'Segoe UI', sans-serif; }
+#noirboard-modal-overlay .nb-mode-modern .nb-modern-terminal { margin: 10px 16px; border: 1px solid #5488b3; border-radius: 5px; box-shadow: 0 12px 24px #0006; }
+#noirboard-modal-overlay .nb-terminal-header { gap: 10px; flex-wrap: wrap; }
+@media (max-width: 780px) {
+    #noirboard-modal-overlay .nb-desk-management { flex-wrap: nowrap; overflow-x: auto; padding: 4px 0 8px; }
+    #noirboard-modal-overlay .nb-doc-object { grid-template-columns: minmax(0, 1fr); }
+    #noirboard-modal-overlay .nb-object-stage { min-height: 260px; }
+    #noirboard-modal-overlay .nb-object-stage :is(svg, img) { height: 220px; }
+    #noirboard-modal-overlay .nb-mode-modern .nb-desk-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 780px) {
     #noirboard-modal-overlay .nb-mode-supernatural .nb-desk-surface::before { font-size: 22px; letter-spacing: 4px; }
 }
