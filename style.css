@@ -2188,6 +2188,12 @@
     .nb-folder-field, .nb-folder-title-line, .nb-classified-header, .nb-news-masthead) { border-color: var(--nb-sheet-border); }
 
 /* 1.3 — selection, physical exhibits and computer file explorer. */
+#noirboard-modal-overlay .nb-builtin-evidence { filter: saturate(.8) contrast(.97) drop-shadow(4px 9px 7px #0007); }
+#noirboard-modal-overlay .nb-wall-object-preview { height: 120px; display: flex; align-items: center; justify-content: center; margin: 6px 0; }
+#noirboard-modal-overlay .nb-fingerprint-sample { display: block; width: auto; height: 160px; max-width: 100%; object-fit: contain; margin: auto; }
+#noirboard-modal-overlay .nb-card-fp-preview .nb-fingerprint-sample { height: 100%; }
+#noirboard-modal-overlay .nb-mode-modern .nb-fingerprint-sample { filter: invert(1); }
+#noirboard-modal-overlay .nb-asset-notice { display: block; font: 12px/1.6 'Segoe UI', sans-serif; opacity: .8; margin: 12px 0; }
 #noirboard-modal-overlay .nb-desk-management { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
 #noirboard-modal-overlay .nb-desk-management .nb-btn { font-size: 12px; padding: 7px 10px; }
 #noirboard-modal-overlay .nb-material-select { display: flex; align-items: center; gap: 8px; font: 12px/1.4 'Segoe UI', sans-serif; margin-bottom: 8px; cursor: pointer; }

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -8,7 +8,7 @@ const output = path.join(root, '.browser-check');
 mkdirSync(output, { recursive: true });
 const browser = process.env.NOIRBOARD_BROWSER || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 if (!existsSync(browser)) throw Error('Set NOIRBOARD_BROWSER to a Chromium browser executable.');
-const source = readFileSync(path.join(root, 'index.js'), 'utf8');
+const source = readFileSync(path.join(root, 'index.js'), 'utf8').replace(/import\.meta\.url/g, JSON.stringify(pathToFileURL(path.join(root, 'index.js')).href));
 const css = readFileSync(path.join(root, 'style.css'), 'utf8');
 
 async function browserTests(mode, view, viewportWidth, viewportHeight) {
@@ -34,7 +34,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         check('main window fits viewport', fits(document.querySelector('.nb-window')));
         check('desk has no horizontal overflow', document.querySelector('.nb-desk-surface').scrollWidth <= document.querySelector('.nb-desk-surface').clientWidth + 1);
         let current = storage.getCurrentCase();
-        const demoExpected = mode === 'supernatural' ? 13 : 10;
+        const demoExpected = mode === 'supernatural' ? 24 : 21;
         check('demo preserves existing evidence', current.items.filter(item => item.isDemo).length === demoExpected);
         click('.nb-act-load-demo');
         check('demo repeat is idempotent', storage.getCurrentCase().items.filter(item => item.isDemo).length === demoExpected);
@@ -49,6 +49,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
         current.items.push(personalItem);
         storage.saveCurrentCase(current);
         ui.render();
+        check('local evidence images loaded', [...document.querySelectorAll('.nb-test-preload')].every(image => image.complete && image.naturalWidth > 0));
         click('.nb-act-remove-demo');
         check('remove demo retains personal evidence', storage.getCurrentCase().items.length === 1 && storage.getCurrentCase().items[0].id === personalItem.id);
         click('.nb-act-load-demo');
@@ -140,6 +141,7 @@ async function browserTests(mode, view, viewportWidth, viewportHeight) {
             if (view === 'document') click('.nb-desk-card--dossier .nb-act-inspect');
             if (view === 'prints') click('.nb-desk-card--fingerprints .nb-act-inspect');
             if (view === 'map') click('.nb-desk-card--map .nb-act-inspect');
+            if (view === 'object') click('.nb-desk-card--evidence_bag .nb-act-inspect');
         }
     } catch (error) { results.push({ name: error.message, pass: false }); }
     document.body.dataset.testResults = JSON.stringify(results);
@@ -157,15 +159,18 @@ const scenarios = [
     ['phone-mystic-document', 390, 844, 'supernatural', 'document'],
     ['desktop-prints', 1440, 1000, 'standard', 'prints'],
     ['desktop-map', 1440, 1000, 'standard', 'map'],
+    ['desktop-object', 1440, 1000, 'standard', 'object'],
+    ['phone-object', 390, 844, 'modern', 'object'],
 ];
 let failures = 0;
 for (const [name, width, height, mode, view] of scenarios) {
     // Desktop headless Edge imposes a minimum layout viewport wider than its screenshot.
     // Constrain the containing overlay too, so mobile layout checks use the requested width.
-    const html = `<!doctype html><html lang="ru"><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;background:#111} ${css}\n#noirboard-modal-overlay{width:${width}px;height:${height}px;right:auto;bottom:auto}</style><body><script>window.jQuery=()=>{};${source.replace(/<\/script/gi, '<\\/script')}\n(${browserTests.toString()})(${JSON.stringify(mode)},${JSON.stringify(view)},${width},${height});</script></body></html>`;
+    const preloads = readdirSync(path.join(root, 'assets/evidence')).filter(name => name.endsWith('.png')).map(name => `<img class="nb-test-preload" style="display:none" src="${pathToFileURL(path.join(root, 'assets/evidence', name)).href}">`).join('');
+    const html = `<!doctype html><html lang="ru"><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;background:#111} ${css}\n#noirboard-modal-overlay{width:${width}px;height:${height}px;right:auto;bottom:auto}</style><body>${preloads}<script>window.jQuery=()=>{};${source.replace(/<\/script/gi, '<\\/script')}\nwindow.addEventListener('load', () => (${browserTests.toString()})(${JSON.stringify(mode)},${JSON.stringify(view)},${width},${height}));</script></body></html>`;
     const page = path.join(output, `${name}.html`);
     writeFileSync(page, html);
-    const run = spawnSync(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--force-device-scale-factor=1', `--user-data-dir=${path.join(output, 'profile')}`, `--window-size=${width},${height}`, '--dump-dom', `--screenshot=${path.join(output, `${name}.png`)}`, pathToFileURL(page).href], { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
+    const run = spawnSync(browser, ['--headless', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--virtual-time-budget=4000', '--force-device-scale-factor=1', `--user-data-dir=${path.join(output, 'profile')}`, `--window-size=${width},${height}`, '--dump-dom', `--screenshot=${path.join(output, `${name}.png`)}`, pathToFileURL(page).href], { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
     writeFileSync(path.join(output, `${name}.dom.html`), run.stdout || '');
     const match = run.stdout?.match(/data-test-results="([^"]*)"/);
     if (!match) { failures++; console.error(name, 'No browser results', run.error?.message || run.stderr?.slice(-1200)); continue; }

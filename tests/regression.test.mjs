@@ -2,8 +2,9 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 
-const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/import\.meta\.url/g, JSON.stringify(new URL('../index.js', import.meta.url).href));
 function load() {
     const sandbox = vm.createContext({ console, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, jQuery: () => {} });
     vm.runInContext(source, sandbox);
@@ -210,7 +211,7 @@ test('object evidence uses item-specific SVGs instead of treating every exhibit 
     const app = load();
     for (const [name, kind] of [['weapon', 'pistol'], ['blood sample', 'blood_bag'], ['amulet', 'amulet'], ['cloth doll', 'doll'], ['crystal', 'crystal']]) {
         const item = app.normalizeItem({ type: 'evidence_bag', title: name, metadata: { objectKind: kind } });
-        assert.match(app.renderObjectVisual(item), /<svg/);
+        assert.match(app.renderObjectVisual(item), /<(svg|img)/);
         assert.match(app.renderInspectorContent(item), /nb-doc-object/);
     }
 });
@@ -244,4 +245,22 @@ test('image credits retain attribution but render no duplicate pictures', () => 
     assert.match(html, /CC BY 4.0/);
     assert.match(html, /<details/);
     assert.doesNotMatch(html, /<img/);
+});
+
+test('built-in asset matching covers supplied exhibits without breaking custom images', () => {
+    const app = load();
+    const cases = [['Складной нож', 'folding_knife'], ['Связка ключей', 'keys'], ['Флакон лекарства', 'medicine'],
+        ['Разбитый телефон', 'phone'], ['Купюры', 'money'], ['Патроны', 'cartridges'], ['Тактический нож', 'knife'],
+        ['Серебристый пистолет', 'pistol_silver'], ['Пакет с уликами', 'evidence_package'], ['Растительный образец', 'plant_sample']];
+    for (const [title, kind] of cases) {
+        const item = app.normalizeItem({ type: 'evidence_bag', title });
+        assert.equal(app.objectKind(item), kind);
+        assert.ok(existsSync(new URL(app.builtinEvidenceUrl(kind))));
+        assert.match(app.renderObjectVisual(item), /nb-builtin-evidence/);
+        item.imageUrl = '/images/custom.png';
+        assert.match(app.renderObjectVisual(item), /\/images\/custom.png/);
+        assert.doesNotMatch(app.renderObjectVisual(item), /nb-builtin-evidence/);
+    }
+    assert.equal(app.builtinEvidenceUrl('../../unknown'), '');
+    assert.match(app.renderFingerprintSample('test', 1), /fingerprint-[12]\.png/);
 });

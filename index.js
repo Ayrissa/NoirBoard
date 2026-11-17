@@ -1,5 +1,17 @@
 // NoirBoard — Стол детектива и Стена улик для SillyTavern.
 // Styles are loaded by SillyTavern from style.css via manifest.json.
+const NB_ASSET_BASE = new URL('./assets/evidence/', import.meta.url).href;
+const EVIDENCE_ASSETS = Object.freeze({
+    pistol: 'pistol-dark.png', pistol_silver: 'pistol-silver.png',
+    knife: 'knife-tactical.png', folding_knife: 'knife-folding.png', keys: 'keys.png',
+    medicine: 'medicine.png', phone: 'phone.png', plant_sample: 'plant-sample.png',
+    money: 'banknotes.png', cartridges: 'cartridges.png', pocket_contents: 'pocket-contents.png',
+    evidence_package: 'evidence-bag.png',
+});
+
+function builtinEvidenceUrl(kind) {
+    return EVIDENCE_ASSETS[kind] ? new URL(EVIDENCE_ASSETS[kind], NB_ASSET_BASE).href : '';
+}
 
 
 
@@ -56,7 +68,7 @@ const ITEM_TYPES = {
     },
     evidence_bag: {
         id: 'evidence_bag',
-        label: 'Зип-пакет с уликой',
+        label: 'Вещественное доказательство',
         icon: 'fa-solid fa-bag-shopping',
         badge: 'ВЕЩДОК',
         defaultPinned: true,
@@ -451,6 +463,16 @@ function addDemoMaterials(caseData, mode) {
         ['evidence_bag', 'Пистолет', 'Разряженный пистолет найден под скамьёй. Принадлежность не установлена.', { objectKind: 'pistol' }],
         ['evidence_bag', 'Пакет крови', 'Запечатанный медицинский пакет с образцом неизвестного происхождения.', { objectKind: 'blood_bag' }],
     ];
+    const demoObjects = [
+        ['pistol_silver', 'Серебристый пистолет'], ['knife', 'Тактический нож'],
+        ['folding_knife', 'Складной нож'], ['keys', 'Связка ключей'],
+        ['medicine', 'Флакон лекарства'], ['phone', 'Разбитый телефон'],
+        ['plant_sample', 'Пакет с растительным образцом'], ['money', 'Купюры с красными пятнами'],
+        ['cartridges', 'Патроны'], ['pocket_contents', 'Содержимое карманов'],
+        ['evidence_package', 'Пакет с вещественными уликами'],
+    ];
+    for (const [objectKind, title] of demoObjects) specs.push(['evidence_bag', title,
+        'Демонстрационный предмет. Изображение показывает оформление вещдока; надписи и детали на нём не являются установленными фактами дела.', { objectKind }]);
     if (mode === 'supernatural') specs.push(
         ['occult', 'Серебряный амулет', 'Амулет холоднее окружающего воздуха. Причина не установлена.', { objectKind: 'amulet' }],
         ['occult', 'Тряпичная кукла', 'На ткани видны следы воска и три узла из красной нити.', { objectKind: 'doll' }],
@@ -612,18 +634,31 @@ function renderCrimeMapSvg(item) {
 }
 
 function objectKind(item) {
-    if (['pistol', 'blood_bag', 'amulet', 'doll', 'crystal'].includes(item.metadata?.objectKind)) return item.metadata.objectKind;
+    if (Object.hasOwn(EVIDENCE_ASSETS, item.metadata?.objectKind) || ['blood_bag', 'amulet', 'doll', 'crystal'].includes(item.metadata?.objectKind)) return item.metadata.objectKind;
     const text = `${item.title} ${item.subtitle}`.toLowerCase();
+    if (/патрон|гильз|cartridge|shotgun shell|\bammo\b/.test(text)) return 'cartridges';
+    if (/складн.*нож|перочин|folding knife|pocket knife/.test(text)) return 'folding_knife';
+    if (/нож|кинжал|\bknife\b|\bdagger\b/.test(text)) return 'knife';
+    if (/ключ|\bkeys?\b/.test(text)) return 'keys';
+    if (/лекарств|таблет|медикамент|medicine|pill bottle|prescription/.test(text)) return 'medicine';
+    if (/телефон|смартфон|\bphone\b|smartphone/.test(text)) return 'phone';
+    if (/купюр|банкнот|деньг|banknote|\bcash\b|\bmoney\b/.test(text)) return 'money';
+    if (/растительн|марихуан|каннабис|cannabis|plant sample/.test(text)) return 'plant_sample';
+    if (/карман|pocket contents/.test(text)) return 'pocket_contents';
+    if (/(серебрист|silver|beretta|беретт).*(пистолет|pistol)|пистолет.*серебрист/.test(text)) return 'pistol_silver';
     if (/пистолет|pistol|handgun/.test(text)) return 'pistol';
     if (/кров|blood/.test(text)) return 'blood_bag';
     if (/кукл|doll/.test(text)) return 'doll';
     if (/амулет|талисман|amulet|talisman/.test(text)) return 'amulet';
     if (/кристалл|crystal/.test(text)) return 'crystal';
+    if (/пакет.*улик|пакет.*вещ|evidence bag|evidence package/.test(text)) return 'evidence_package';
     return 'unknown';
 }
 
 function renderObjectVisual(item) {
     if (item.imageUrl) return `<img class="nb-object-cutout" src="${escapeHtml(safeImageUrl(item.imageUrl))}" alt="${escapeHtml(item.title)}" referrerpolicy="no-referrer">`;
+    const asset = builtinEvidenceUrl(objectKind(item));
+    if (asset) return `<img class="nb-object-cutout nb-builtin-evidence" src="${escapeHtml(asset)}" alt="${escapeHtml(item.title)} — иллюстрация" draggable="false">`;
     const shapes = {
         pistol: '<path d="M38 67h162l8 27H120l-13 22 19 55H87l-22-65H38z" fill="#383b40" stroke="#17191c" stroke-width="4"/><path d="M43 74h153M120 99v25h28l12-25M87 121l15 44" fill="none" stroke="#8d9295" stroke-width="5"/>',
         blood_bag: '<path d="M85 24h70v22l13 12v107q0 15-15 15H87q-15 0-15-15V58l13-12z" fill="#d7dedba0" stroke="#c6cfca" stroke-width="4"/><path d="M79 83h82v77q0 12-12 12H91q-12 0-12-12z" fill="#791d29"/><path d="M111 26v-15h18v15M120 180v30" fill="none" stroke="#bfc8c5" stroke-width="5"/><rect x="90" y="103" width="60" height="40" fill="#eee4ce"/><text x="120" y="129" text-anchor="middle" fill="#68202a" font-size="17">BLOOD</text>',
@@ -637,7 +672,13 @@ function renderObjectVisual(item) {
 
 function renderObjectView(item) {
     return `<div class="nb-doc-object"><div class="nb-object-stage">${renderObjectVisual(item)}<span class="nb-object-label">${escapeHtml(item.code)}</span></div>
-        <div class="nb-object-record"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.subtitle)}</p>${formatParagraphs(item.content)}</div></div>`;
+        <div class="nb-object-record"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.subtitle)}</p>${formatParagraphs(item.content)}${!item.imageUrl && builtinEvidenceUrl(objectKind(item)) ? '<small class="nb-asset-notice">Библиотечная иллюстрация. Надписи и детали на фото не определяют факты дела.</small>' : ''}</div></div>`;
+}
+
+function renderFingerprintSample(seed = '', variant = 0) {
+    const number = (Array.from(String(seed)).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) + variant) % 2 + 1;
+    const url = new URL(`fingerprint-${number}.png`, NB_ASSET_BASE).href;
+    return `<img class="nb-fingerprint-sample" src="${escapeHtml(url)}" alt="Иллюстративный образец отпечатка ${number}" draggable="false">`;
 }
 
 function renderDeskItemCard(item, isPinned = false, selected = false) {
@@ -649,7 +690,7 @@ function renderDeskItemCard(item, isPinned = false, selected = false) {
     if (['occult', 'evidence_bag'].includes(item.type)) {
         visualPreview = `<div class="nb-card-object-preview">${renderObjectVisual(item)}</div>`;
     } else if (item.type === 'fingerprints' && !item.imageUrl) {
-        visualPreview = `<div class="nb-card-fp-preview">${renderFingerprintSvg(meta.fingerprintPattern || 'whorl', item.id, 0)}</div>`;
+        visualPreview = `<div class="nb-card-fp-preview">${['palm', 'footprint'].includes(meta.fingerprintPattern) ? renderFingerprintSvg(meta.fingerprintPattern, item.id, 0) : renderFingerprintSample(item.id)}</div>`;
     } else if (item.type === 'map' && !item.imageUrl) {
         visualPreview = `<div class="nb-card-map-preview">${renderCrimeMapSvg(item)}</div>`;
     } else if (item.imageUrl) {
@@ -935,19 +976,19 @@ function renderFingerprintsView(item) {
             <div class="nb-fp-fingers-col">
                 <div class="nb-fp-mini-box">
                     <div class="nb-fp-mini-label">Образец R.1 (Большой)</div>
-                    ${renderFingerprintSvg('whorl', item.id, 1)}
+                    ${renderFingerprintSample(item.id, 1)}
                 </div>
                 <div class="nb-fp-mini-box">
                     <div class="nb-fp-mini-label">Образец R.2 (Указательный)</div>
-                    ${renderFingerprintSvg('loop', item.id, 2)}
+                    ${renderFingerprintSample(item.id, 2)}
                 </div>
                 <div class="nb-fp-mini-box">
                     <div class="nb-fp-mini-label">Образец R.3 (Средний)</div>
-                    ${renderFingerprintSvg('arch', item.id, 3)}
+                    ${renderFingerprintSample(item.id, 3)}
                 </div>
                 <div class="nb-fp-mini-box">
                     <div class="nb-fp-mini-label">Увеличенный фрагмент</div>
-                    ${renderFingerprintSvg(pattern, item.id, 4)}
+                    ${['palm', 'footprint'].includes(pattern) ? renderFingerprintSvg(pattern, item.id, 4) : renderFingerprintSample(item.id, 4)}
                 </div>
             </div>
             <div class="nb-fp-palm-col">
@@ -958,6 +999,7 @@ function renderFingerprintsView(item) {
             </div>
         </div>
         <div class="nb-fp-lab-notes">
+            <small class="nb-asset-notice">Отпечатки — два повторяемых иллюстративных образца, не уникальные биометрические данные. Совпадения определяются сюжетом, не картинкой.</small>
             <div><strong>Поверхность изъятия:</strong> ${escapeHtml(surface)}</div>
             <div class="nb-fp-lab-content">${formatParagraphs(item.content)}</div>
         </div>
@@ -2116,13 +2158,15 @@ function createNoirBoardUI({ storage }) {
 
     function renderWallNode(node) {
         const isSource = connectSourceNodeId === node.id;
+        const item = storage.getCurrentCase().items.find(item => item.id === node.itemId);
+        const builtin = item && !node.isSubClue && ['evidence_bag', 'occult'].includes(item.type) ? renderObjectVisual(item) : '';
         return `
         <div class="nb-wall-node nb-wall-node--${escapeHtml(node.type)} ${isSource ? 'is-connect-source' : ''}"
              data-node-id="${escapeHtml(node.id)}"
              style="left: ${node.x}px; top: ${node.y}px;">
             <div class="nb-wall-pin" data-pin-node-id="${escapeHtml(node.id)}" title="Нажмите, чтобы протянуть нитку к другой улике"></div>
             <div class="nb-wall-evidence-tag">${escapeHtml(node.tag)}</div>
-            ${node.imageUrl ? `<div class="nb-wall-node-photo"><img src="${escapeHtml(node.imageUrl)}" alt="${escapeHtml(node.title)}"></div>` : ''}
+            ${builtin ? `<div class="nb-wall-object-preview">${builtin}</div>` : node.imageUrl ? `<div class="nb-wall-node-photo"><img src="${escapeHtml(node.imageUrl)}" alt="${escapeHtml(node.title)}"></div>` : ''}
             <div class="nb-wall-node-title">${escapeHtml(node.title)}</div>
             ${node.subtitle ? `<div class="nb-wall-node-sub">${escapeHtml(node.subtitle)}</div>` : ''}
             <div class="nb-wall-node-snippet">${escapeHtml(node.snippet)}</div>
